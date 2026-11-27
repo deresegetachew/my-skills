@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { UsageMetrics } from "./types.ts";
 import { CrewCliError } from "./types.ts";
 
@@ -70,14 +70,10 @@ export function shellQuote(arg: string): string {
   return `'${arg.replace(/'/g, `'\\''`)}'`;
 }
 
-export function buildSshStartCommand(opts: {
+export function buildSshCrewCommand(opts: {
   sshCommand: string;
   remotePath: string;
-  role: string;
-  briefArg: string;
-  branch?: string;
-  continueJobId?: string;
-  timeout?: string;
+  crewArgs: string[];
 }): string[] {
   const sshParts = opts.sshCommand.trim().split(/\s+/).filter(Boolean);
   if (sshParts.length === 0) {
@@ -88,9 +84,21 @@ export function buildSshStartCommand(opts: {
     );
   }
 
+  const crewArgs = ["bun", "claude-agent-crew/runner/crew.ts", ...opts.crewArgs];
+  const remoteCmd = `cd ${shellQuote(opts.remotePath)} && ${crewArgs.map(shellQuote).join(" ")}`;
+  return [...sshParts, remoteCmd];
+}
+
+export function buildSshStartCommand(opts: {
+  sshCommand: string;
+  remotePath: string;
+  role: string;
+  briefArg: string;
+  branch?: string;
+  continueJobId?: string;
+  timeout?: string;
+}): string[] {
   const crewArgs = [
-    "bun",
-    "claude-agent-crew/runner/crew.ts",
     "start",
     "--role",
     opts.role,
@@ -107,16 +115,18 @@ export function buildSshStartCommand(opts: {
   if (opts.timeout) {
     crewArgs.push("--timeout", opts.timeout);
   }
-
-  const remoteCmd = `cd ${shellQuote(opts.remotePath)} && ${crewArgs.map(shellQuote).join(" ")}`;
-  return [...sshParts, remoteCmd];
+  return buildSshCrewCommand({
+    sshCommand: opts.sshCommand,
+    remotePath: opts.remotePath,
+    crewArgs,
+  });
 }
 
 export function toRemoteBriefPath(repoRoot: string, briefFile: string): string {
   const abs = resolve(briefFile);
-  const rel = relative(repoRoot, abs);
-  if (!rel.startsWith("..") && !rel.startsWith("/")) {
-    return rel;
+  const rel = relative(resolve(repoRoot), abs);
+  if (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel)) {
+    return rel || ".";
   }
   return briefFile;
 }
@@ -163,12 +173,16 @@ export function parseAgyOutput(stdoutText: string, stderrText = ""): ParsedWorke
   try {
     parsed = JSON.parse(trimmed);
   } catch {
-    // Handle case where diagnostic lines precede a final JSON object
+    // Handle case where diagnostic lines precede or follow a JSON object
     const lines = trimmed.split(/\r?\n/).reverse();
     for (const line of lines) {
+      if (!line.trim()) continue;
       try {
-        parsed = JSON.parse(line);
-        break;
+        const candidate: unknown = JSON.parse(line);
+        if (isRecord(candidate)) {
+          parsed = candidate;
+          break;
+        }
       } catch {
         continue;
       }

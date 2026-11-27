@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { JobRecord } from "./types.ts";
 import { CrewCliError } from "./types.ts";
 import { worktreesDir } from "./store.ts";
@@ -105,7 +105,41 @@ export function listWorktrees(repoRoot: string): WorktreeInfo[] {
 export function isWorktreeDirty(worktreePath: string): boolean {
   if (!existsSync(worktreePath)) return false;
   const res = runGit(worktreePath, ["status", "--porcelain"]);
-  return res.exitCode === 0 && res.stdout.trim().length > 0;
+  if (res.exitCode !== 0) return true;
+  return res.stdout.trim().length > 0;
+}
+
+function canonicalizePath(p: string): string {
+  const abs = resolve(p);
+  if (existsSync(abs)) {
+    try {
+      return realpathSync(abs);
+    } catch {
+      return abs;
+    }
+  }
+  const parent = dirname(abs);
+  if (parent !== abs && existsSync(parent)) {
+    try {
+      return join(realpathSync(parent), basename(abs));
+    } catch {
+      return abs;
+    }
+  }
+  return abs;
+}
+
+function isSubpath(base: string, target: string): boolean {
+  const rel = relative(base, target);
+  return rel.length > 0 && rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
+}
+
+export function isUnderWorktreesDir(repoRoot: string, wtPath: string): boolean {
+  const canonRepo = canonicalizePath(repoRoot);
+  const canonBase = resolve(canonRepo, ".crew", "worktrees");
+  const canonTarget = canonicalizePath(wtPath);
+  if (!isSubpath(canonBase, canonTarget)) return false;
+  return isSubpath(resolve(worktreesDir(repoRoot)), resolve(wtPath));
 }
 
 function sanitizeBranchSlug(branch: string): string {
@@ -118,6 +152,20 @@ export interface WorktreeAssignment {
   reused: boolean;
 }
 
+function findWorktreeHolder(
+  runningJobs: JobRecord[] | undefined,
+  wtPath: string,
+  branchName: string,
+): JobRecord | undefined {
+  if (!runningJobs) return undefined;
+  const canonTarget = canonicalizePath(wtPath);
+  return runningJobs.find(
+    (j) =>
+      j.remotePath === null &&
+      (canonicalizePath(j.worktree) === canonTarget || (j.branch !== null && j.branch === branchName)),
+  );
+}
+
 export function prepareWorktree(
   repoRoot: string,
   opts: {
@@ -125,11 +173,30 @@ export function prepareWorktree(
     role: string;
     branch?: string;
     continueJob?: JobRecord | null;
+    runningJobs?: JobRecord[];
   },
 ): WorktreeAssignment {
   if (opts.continueJob) {
     const prevWt = opts.continueJob.worktree;
     if (existsSync(prevWt)) {
+      if (!isUnderWorktreesDir(repoRoot, prevWt)) {
+        throw new CrewCliError(
+          "WORKTREE_OUTSIDE_CREW",
+          `Refusing to reuse worktree outside .crew/worktrees/: ${prevWt}`,
+          "Start a fresh job so the runner creates a worktree under .crew/worktrees/.",
+        );
+      }
+      const canonPrev = canonicalizePath(prevWt);
+      const holder = opts.runningJobs?.find(
+        (j) => j.remotePath === null && canonicalizePath(j.worktree) === canonPrev,
+      );
+      if (holder) {
+        throw new CrewCliError(
+          "WORKTREE_IN_USE",
+          `Worktree at ${prevWt} is already in use by running job "${holder.id}".`,
+          `Wait for job "${holder.id}" (\`bun claude-agent-crew/runner/crew.ts wait ${holder.id}\`) before continuing.`,
+        );
+      }
       return { worktree: prevWt, branch: opts.continueJob.branch, reused: true };
     }
   }
@@ -150,8 +217,26 @@ export function prepareWorktree(
   }
 
   const branchName = opts.branch ?? `crew/${opts.jobId}`;
-  const existing = listWorktrees(repoRoot).find((w) => w.branch === branchName);
+  const matchingWorktrees = listWorktrees(repoRoot).filter((w) => w.branch === branchName);
+  const external = matchingWorktrees.find((w) => !isUnderWorktreesDir(repoRoot, w.path));
+  if (external) {
+    throw new CrewCliError(
+      "BRANCH_CHECKED_OUT_ELSEWHERE",
+      `Branch "${branchName}" is already checked out outside .crew/worktrees/ at ${external.path}.`,
+      `Switch ${external.path} to another branch or pass a different --branch to crew start.`,
+    );
+  }
+
+  const existing = matchingWorktrees.find((w) => isUnderWorktreesDir(repoRoot, w.path));
   if (existing) {
+    const holder = findWorktreeHolder(opts.runningJobs, existing.path, branchName);
+    if (holder) {
+      throw new CrewCliError(
+        "WORKTREE_IN_USE",
+        `Worktree at ${existing.path} (branch "${branchName}") is already in use by running job "${holder.id}".`,
+        `Wait for job "${holder.id}" (\`bun claude-agent-crew/runner/crew.ts wait ${holder.id}\`) or pass a different --branch.`,
+      );
+    }
     if (isWorktreeDirty(existing.path)) {
       throw new CrewCliError(
         "DIRTY_WORKSPACE",
@@ -163,6 +248,15 @@ export function prepareWorktree(
   }
 
   const wtPath = join(worktreesDir(repoRoot), sanitizeBranchSlug(branchName));
+  const holder = findWorktreeHolder(opts.runningJobs, wtPath, branchName);
+  if (holder) {
+    throw new CrewCliError(
+      "WORKTREE_IN_USE",
+      `Worktree for branch "${branchName}" is already in use by running job "${holder.id}".`,
+      `Wait for job "${holder.id}" (\`bun claude-agent-crew/runner/crew.ts wait ${holder.id}\`) or pass a different --branch.`,
+    );
+  }
+
   const branchExists =
     runGit(repoRoot, ["show-ref", "--verify", "--quiet", `refs/heads/${branchName}`]).exitCode === 0;
   const addArgs = branchExists
@@ -187,12 +281,14 @@ function resolveBaseBranch(repoRoot: string): string | null {
   return null;
 }
 
+function localBranchExists(repoRoot: string, branch: string): boolean {
+  return runGit(repoRoot, ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`]).exitCode === 0;
+}
+
 function isBranchMerged(repoRoot: string, branch: string): boolean {
   const base = resolveBaseBranch(repoRoot);
   if (!base || base === branch) return false;
-  const branchExists =
-    runGit(repoRoot, ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`]).exitCode === 0;
-  if (!branchExists) return false;
+  if (!localBranchExists(repoRoot, branch)) return false;
   const res = runGit(repoRoot, ["merge-base", "--is-ancestor", branch, base]);
   return res.exitCode === 0;
 }
@@ -209,6 +305,14 @@ function isBranchDeletedOnOrigin(repoRoot: string, branch: string): boolean {
   return remoteHeads.stdout.trim().length === 0;
 }
 
+function isBranchPresentOnOrigin(repoRoot: string, branch: string): boolean {
+  const originUrl = runGit(repoRoot, ["remote", "get-url", "origin"]);
+  if (originUrl.exitCode !== 0) return false;
+  const remoteHeads = runGit(repoRoot, ["ls-remote", "--heads", "origin", branch]);
+  if (remoteHeads.exitCode !== 0) return true; // Assume present if origin unreachable
+  return remoteHeads.stdout.trim().length > 0;
+}
+
 export interface CleanResult {
   removed: string[];
   kept: Array<{ worktree: string; reason: string }>;
@@ -220,28 +324,58 @@ export function cleanFinishedWorktrees(
   isRunning: (job: JobRecord) => boolean,
 ): CleanResult {
   const activeWorktrees = new Set(
-    jobs.filter((j) => isRunning(j)).map((j) => resolve(j.worktree)),
+    jobs
+      .filter((j) => isRunning(j) && j.remotePath === null)
+      .map((j) => canonicalizePath(j.worktree)),
   );
-  const trackedWorktrees = new Set(listWorktrees(repoRoot).map((w) => resolve(w.path)));
+  const trackedList = listWorktrees(repoRoot);
+  const trackedMap = new Map<string, WorktreeInfo>();
+  for (const w of trackedList) {
+    trackedMap.set(canonicalizePath(w.path), w);
+  }
+
   const removedSet = new Set<string>();
   const removed: string[] = [];
   const kept: Array<{ worktree: string; reason: string }> = [];
 
   for (const job of jobs) {
+    if (job.remotePath !== null) continue;
     const wt = resolve(job.worktree);
-    if (wt === resolve(repoRoot)) continue;
-    if (removedSet.has(wt)) continue;
-    if (!existsSync(wt) && !trackedWorktrees.has(wt)) continue;
+    const canonWt = canonicalizePath(wt);
+    if (canonWt === canonicalizePath(repoRoot)) continue;
+    if (removedSet.has(canonWt)) continue;
+    if (!existsSync(wt) && !trackedMap.has(canonWt)) continue;
 
-    if (activeWorktrees.has(wt)) {
+    if (!isUnderWorktreesDir(repoRoot, wt)) {
+      kept.push({ worktree: wt, reason: "outside .crew/worktrees/" });
+      continue;
+    }
+
+    if (activeWorktrees.has(canonWt)) {
       kept.push({ worktree: wt, reason: "job still running" });
       continue;
     }
 
+    if (isWorktreeDirty(wt)) {
+      kept.push({ worktree: wt, reason: "worktree has uncommitted changes" });
+      continue;
+    }
+
+    if (!existsSync(wt)) {
+      runGit(repoRoot, ["worktree", "prune"]);
+      if (!listWorktrees(repoRoot).some((w) => canonicalizePath(w.path) === canonWt)) {
+        removedSet.add(canonWt);
+        removed.push(wt);
+      } else {
+        kept.push({ worktree: wt, reason: "worktree prune did not remove entry" });
+      }
+      continue;
+    }
+
     if (isReadOnlyRole(job.role)) {
-      const rm = runGit(repoRoot, ["worktree", "remove", "--force", wt]);
+      const rm = runGit(repoRoot, ["worktree", "remove", wt]);
       if (rm.exitCode === 0) {
-        removedSet.add(wt);
+        removedSet.add(canonWt);
         removed.push(wt);
       } else {
         kept.push({ worktree: wt, reason: rm.stderr || "worktree remove failed" });
@@ -255,16 +389,28 @@ export function cleanFinishedWorktrees(
       continue;
     }
 
-    const merged = isBranchMerged(repoRoot, branch);
-    const deletedRemote = isBranchDeletedOnOrigin(repoRoot, branch);
-    if (!merged && !deletedRemote) {
-      kept.push({ worktree: wt, reason: `branch "${branch}" not merged or deleted on origin` });
+    const wtInfo = trackedMap.get(canonWt);
+    const effectiveBranch =
+      !localBranchExists(repoRoot, branch) && wtInfo?.branch && wtInfo.branch !== branch
+        ? wtInfo.branch
+        : branch;
+
+    if (localBranchExists(repoRoot, effectiveBranch)) {
+      const merged = isBranchMerged(repoRoot, effectiveBranch);
+      const deletedRemote = isBranchDeletedOnOrigin(repoRoot, effectiveBranch);
+      if (!merged && !deletedRemote) {
+        kept.push({ worktree: wt, reason: `branch "${effectiveBranch}" not merged or deleted on origin` });
+        continue;
+      }
+    } else if (isBranchPresentOnOrigin(repoRoot, effectiveBranch)) {
+      kept.push({ worktree: wt, reason: `branch "${effectiveBranch}" still exists on origin` });
       continue;
     }
 
-    const rm = runGit(repoRoot, ["worktree", "remove", "--force", wt]);
+    // Never force-remove a builder worktree
+    const rm = runGit(repoRoot, ["worktree", "remove", wt]);
     if (rm.exitCode === 0) {
-      removedSet.add(wt);
+      removedSet.add(canonWt);
       removed.push(wt);
     } else {
       kept.push({ worktree: wt, reason: rm.stderr || "worktree remove failed" });

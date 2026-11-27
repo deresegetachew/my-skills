@@ -6,16 +6,27 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { buildSshStartCommand, toRemoteBriefPath } from "./worker.ts";
 
 const CREW_TS = resolve(import.meta.dir, "crew.ts");
 const tempRoots: string[] = [];
+const spawnedPids: number[] = [];
 
 afterEach(() => {
+  while (spawnedPids.length > 0) {
+    const pid = spawnedPids.pop();
+    if (pid) {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        // already dead
+      }
+    }
+  }
   while (tempRoots.length > 0) {
     const dir = tempRoots.pop();
     if (dir && existsSync(dir)) {
@@ -32,12 +43,12 @@ interface TestEnv {
   env: Record<string, string>;
 }
 
-function setupRepo(crewJson?: Record<string, unknown>): TestEnv {
+function setupRepo(crewJson?: Record<string, unknown>, repoFolderName = "repo"): TestEnv {
   const root = mkdtempSync(join(tmpdir(), "crew-test-"));
   tempRoots.push(root);
   const home = join(root, "home");
   const binDir = join(root, "bin");
-  const repo = join(root, "repo");
+  const repo = join(root, repoFolderName);
   mkdirSync(home, { recursive: true });
   mkdirSync(binDir, { recursive: true });
   mkdirSync(join(repo, ".claude"), { recursive: true });
@@ -58,6 +69,8 @@ function setupRepo(crewJson?: Record<string, unknown>): TestEnv {
   git(["init", "-b", "main"]);
   git(["config", "user.email", "test@example.com"]);
   git(["config", "user.name", "Test User"]);
+  git(["config", "commit.gpgsign", "false"]);
+  git(["config", "tag.gpgsign", "false"]);
   writeFileSync(join(repo, "README.md"), "# Test Repo\n", "utf8");
 
   const defaultConfig = crewJson ?? {
@@ -418,28 +431,611 @@ echo '{"conversation_id":"conv-resumable-99","result":"Status: DONE\\nFinished a
     expect(existsSync(job.worktree)).toBe(false);
   });
 
-  test("ssh machine command building", () => {
-    const cmd = buildSshStartCommand({
-      sshCommand: "ssh -p 2222 factory@dev-pc",
-      remotePath: "/srv/my repo",
-      role: "builder",
-      briefArg: "briefs/t4.md",
-      branch: "feat/ssh",
-      continueJobId: "builder-1",
-      timeout: "15m",
+  test("remote ssh start -> list -> status -> wait -> result -> cancel via fake ssh on PATH", async () => {
+    const t = setupRepo();
+    const remoteRepo = join(t.root, "remote repo");
+    mkdirSync(join(remoteRepo, ".claude"), { recursive: true });
+
+    const rGit = (args: string[], cwd = remoteRepo): void => {
+      const r = Bun.spawnSync(["git", ...args], { cwd, env: t.env, stdout: "pipe", stderr: "pipe" });
+      if (r.exitCode !== 0) {
+        throw new Error(`remote git ${args.join(" ")} failed: ${r.stderr.toString()}`);
+      }
+    };
+
+    const remoteConfig = {
+      roles: {
+        remote: { worker: "agy", model: "gemini-4-hydrogen-medium", machine: "dev-pc" },
+      },
+      machines: { local: "local", "dev-pc": "ssh -p 2222 factory@dev-pc" },
+      paths: { "dev-pc": remoteRepo },
+    };
+    rGit(["init", "-b", "main"]);
+    rGit(["config", "user.email", "test@example.com"]);
+    rGit(["config", "user.name", "Test User"]);
+    rGit(["config", "commit.gpgsign", "false"]);
+    writeFileSync(join(remoteRepo, "README.md"), "# Remote\n", "utf8");
+    writeFileSync(join(remoteRepo, "..foo.md"), "Remote dotdot brief.\n", "utf8");
+    writeFileSync(join(remoteRepo, ".claude", "crew.json"), JSON.stringify(remoteConfig, null, 2), "utf8");
+    rGit(["add", "README.md", "..foo.md", ".claude/crew.json"]);
+    rGit(["commit", "-m", "remote init"]);
+
+    // Point local repo's dev-pc path to remoteRepo
+    writeFileSync(
+      join(t.repo, ".claude", "crew.json"),
+      JSON.stringify(
+        {
+          roles: {
+            builder: { worker: "agy", model: "gemini-4-hydrogen-medium", machine: "local" },
+            remote: { worker: "agy", model: "gemini-4-hydrogen-medium", machine: "dev-pc" },
+          },
+          machines: { local: "local", "dev-pc": "ssh -p 2222 factory@dev-pc" },
+          paths: { "dev-pc": remoteRepo },
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    const sshLog = join(t.root, "ssh-calls.log");
+    const sshBin = join(t.binDir, "ssh");
+    writeFileSync(
+      sshBin,
+      `#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$*" >> "${sshLog}"
+remote_cmd="\${@: -1}"
+rewritten="\${remote_cmd//claude-agent-crew\\/runner\\/crew.ts/${CREW_TS}}"
+bash -c "$rewritten"
+`,
+      "utf8",
+    );
+    chmodSync(sshBin, 0o755);
+
+    installFakeAgy(
+      t.binDir,
+      `echo '{"conversation_id":"remote-conv-1","result":"Status: DONE\\nRemote work done."}'`,
+    );
+
+    // Use a brief file named ..foo.md inside repoRoot (must be sent as relative "..foo.md")
+    const dotdotBrief = join(t.repo, "..foo.md");
+    writeFileSync(dotdotBrief, "Remote dotdot brief.\n", "utf8");
+
+    const start = runCrew(t, [
+      "start",
+      "--role",
+      "remote",
+      "--brief",
+      dotdotBrief,
+      "--branch",
+      "feat/ssh",
+      "--timeout",
+      "15m",
+    ]);
+    expect(start.exitCode).toBe(0);
+    const jobId = extractJobId(start.stdout);
+    expect(start.stdout).toContain(`wait ${jobId}`);
+
+    const sshCalls = readFileSync(sshLog, "utf8");
+    expect(sshCalls).toContain("-p 2222 factory@dev-pc");
+    expect(sshCalls).toContain(`cd '${remoteRepo}' && `);
+    expect(sshCalls).toContain("'--brief' '..foo.md'");
+    expect(sshCalls).toContain("'--local'");
+    expect(sshCalls).toContain("'--branch' 'feat/ssh'");
+    expect(sshCalls).toContain("'--timeout' '15m'");
+
+    // Local JobRecord must exist with remotePath set
+    const localRecord = JSON.parse(
+      readFileSync(join(t.repo, ".crew", "jobs", `${jobId}.json`), "utf8"),
+    ) as { remotePath: string | null; machine: string; status: string };
+    expect(localRecord.remotePath).toBe(remoteRepo);
+    expect(localRecord.machine).toBe("dev-pc");
+
+    // list shows the remote job
+    const listRes = runCrew(t, ["list"]);
+    expect(listRes.exitCode).toBe(0);
+    expect(listRes.stdout).toContain(jobId);
+
+    // wait, status, and result proxy over SSH
+    const wait = runCrew(t, ["wait", jobId, "--timeout", "10s"]);
+    expect(wait.exitCode).toBe(0);
+    expect(wait.stdout).toContain(`Job ${jobId} done.`);
+
+    const status = runCrew(t, ["status", jobId]);
+    expect(status.exitCode).toBe(0);
+    expect(status.stdout).toContain("Status: done");
+
+    const result = runCrew(t, ["result", jobId]);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("Status: DONE");
+    expect(result.stdout).toContain("Remote work done.");
+
+    // Also test remote cancel
+    installFakeAgy(t.binDir, `sleep 30\necho '{"result":"Status: DONE"}'`);
+    const startSlow = runCrew(t, [
+      "start",
+      "--role",
+      "remote",
+      "--brief",
+      dotdotBrief,
+      "--branch",
+      "feat/ssh-cancel",
+    ]);
+    expect(startSlow.exitCode).toBe(0);
+    const slowId = extractJobId(startSlow.stdout);
+
+    const cancelRes = runCrew(t, ["cancel", slowId]);
+    expect(cancelRes.stderr).toBe("");
+    expect(cancelRes.exitCode).toBe(0);
+    expect(cancelRes.stdout).toContain(`Canceled job ${slowId}`);
+
+    await Bun.sleep(50);
+    const slowResult = runCrew(t, ["result", slowId]);
+    expect(slowResult.exitCode).toBe(4);
+    expect(slowResult.stdout).toContain("Status: CANCELED");
+  });
+
+  test("worktree safety: refuses branches checked out in repoRoot or external worktrees, and clean ignores external paths", () => {
+    const t = setupRepo();
+    const agyMarker = join(t.root, "agy-ran.txt");
+    installFakeAgy(
+      t.binDir,
+      `touch "${agyMarker}"\necho '{"conversation_id":"c1","result":"Status: DONE\\nok"}'`,
+    );
+    const briefPath = join(t.repo, "brief.md");
+    writeFileSync(briefPath, "Task.\n", "utf8");
+
+    // 1. Refuse --branch main when main is checked out in repoRoot
+    const mainStart = runCrew(t, ["start", "--role", "builder", "--brief", briefPath, "--branch", "main"]);
+    expect(mainStart.exitCode).toBe(1);
+    const mainErr = JSON.parse(mainStart.stderr) as { code: string };
+    expect(mainErr.code).toBe("BRANCH_CHECKED_OUT_ELSEWHERE");
+    expect(existsSync(agyMarker)).toBe(false);
+
+    // 2. Refuse branch checked out in a human's separate worktree outside .crew/worktrees/
+    const humanWt = join(t.root, "human-wt");
+    const addWt = Bun.spawnSync(["git", "worktree", "add", "-b", "feat/human", humanWt, "HEAD"], {
+      cwd: t.repo,
+      env: t.env,
+      stdout: "pipe",
+      stderr: "pipe",
     });
+    expect(addWt.exitCode).toBe(0);
 
-    expect(cmd.slice(0, 4)).toEqual(["ssh", "-p", "2222", "factory@dev-pc"]);
-    const remoteShell = cmd[4] ?? "";
-    expect(remoteShell).toContain("cd '/srv/my repo' && ");
-    expect(remoteShell).toContain("'bun' 'claude-agent-crew/runner/crew.ts' 'start'");
-    expect(remoteShell).toContain("'--role' 'builder'");
-    expect(remoteShell).toContain("'--brief' 'briefs/t4.md'");
-    expect(remoteShell).toContain("'--local'");
-    expect(remoteShell).toContain("'--branch' 'feat/ssh'");
-    expect(remoteShell).toContain("'--continue' 'builder-1'");
-    expect(remoteShell).toContain("'--timeout' '15m'");
+    const humanStart = runCrew(t, [
+      "start",
+      "--role",
+      "builder",
+      "--brief",
+      briefPath,
+      "--branch",
+      "feat/human",
+    ]);
+    expect(humanStart.exitCode).toBe(1);
+    const humanErr = JSON.parse(humanStart.stderr) as { code: string };
+    expect(humanErr.code).toBe("BRANCH_CHECKED_OUT_ELSEWHERE");
+    expect(existsSync(agyMarker)).toBe(false);
 
-    expect(toRemoteBriefPath("/repo", "/repo/docs/brief.md")).toBe("docs/brief.md");
+    // 3. Even if a JobRecord points to humanWt and feat/human is merged, clean never removes humanWt
+    mkdirSync(join(t.repo, ".crew", "jobs"), { recursive: true });
+    writeFileSync(
+      join(t.repo, ".crew", "jobs", "bogus-human-1.json"),
+      JSON.stringify(
+        {
+          id: "bogus-human-1",
+          role: "builder",
+          worker: "agy",
+          model: null,
+          machine: "local",
+          machineTarget: "local",
+          remotePath: null,
+          branch: "feat/human",
+          worktree: humanWt,
+          briefFile: briefPath,
+          pid: null,
+          start: new Date().toISOString(),
+          end: new Date().toISOString(),
+          exit: 0,
+          status: "done",
+          conversationId: null,
+          continuedFrom: null,
+          logFile: "",
+          stdoutFile: "",
+          resultText: "ok",
+          error: null,
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    const cleanRes = runCrew(t, ["clean"]);
+    expect(cleanRes.exitCode).toBe(0);
+    expect(existsSync(humanWt)).toBe(true);
+    expect(cleanRes.stdout).toContain("outside .crew/worktrees/");
+  });
+
+  test("clean never removes dirty 0-commit builder worktrees, dirty reviewer worktrees, or running worktrees; removes locally deleted branches", () => {
+    const t = setupRepo();
+    const briefPath = join(t.repo, "brief.md");
+    writeFileSync(briefPath, "Task.\n", "utf8");
+
+    // 1. Builder fails before making any commit (0 commits ahead of main), leaving dirty file
+    installFakeAgy(
+      t.binDir,
+      `
+echo "important uncommitted work" > uncommitted-builder.txt
+echo '{"is_error":true,"result":"failed mid-task"}'
+exit 1
+`,
+    );
+    const failStart = runCrew(t, ["start", "--role", "builder", "--brief", briefPath]);
+    expect(failStart.exitCode).toBe(0);
+    const failId = extractJobId(failStart.stdout);
+    expect(runCrew(t, ["wait", failId, "--timeout", "10s"]).exitCode).toBe(3);
+
+    const failJob = JSON.parse(
+      readFileSync(join(t.repo, ".crew", "jobs", `${failId}.json`), "utf8"),
+    ) as { worktree: string };
+    expect(existsSync(join(failJob.worktree, "uncommitted-builder.txt"))).toBe(true);
+
+    // 2. Reviewer creates a detached worktree and leaves it dirty
+    installFakeAgy(
+      t.binDir,
+      `
+echo "reviewer scratch" > scratch.txt
+echo '{"conversation_id":"rev-1","result":"Status: DONE\\nreviewed"}'
+`,
+    );
+    const revStart = runCrew(t, ["start", "--role", "reviewer", "--brief", briefPath, "--branch", "main"]);
+    expect(revStart.exitCode).toBe(0);
+    const revId = extractJobId(revStart.stdout);
+    expect(runCrew(t, ["wait", revId, "--timeout", "10s"]).exitCode).toBe(0);
+    const revJob = JSON.parse(
+      readFileSync(join(t.repo, ".crew", "jobs", `${revId}.json`), "utf8"),
+    ) as { worktree: string };
+
+    // Verify reviewer worktree is detached
+    const symRef = Bun.spawnSync(["git", "symbolic-ref", "-q", "HEAD"], {
+      cwd: revJob.worktree,
+      env: t.env,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    expect(symRef.exitCode).not.toBe(0);
+
+    // 3. Running job's worktree is kept by clean
+    installFakeAgy(t.binDir, `sleep 30\necho '{"result":"Status: DONE"}'`);
+    const slowStart = runCrew(t, ["start", "--role", "builder", "--brief", briefPath, "--branch", "feat/running-wt"]);
+    expect(slowStart.exitCode).toBe(0);
+    const slowId = extractJobId(slowStart.stdout);
+    const slowJob = JSON.parse(
+      readFileSync(join(t.repo, ".crew", "jobs", `${slowId}.json`), "utf8"),
+    ) as { worktree: string };
+
+    const clean1 = runCrew(t, ["clean"]);
+    expect(clean1.exitCode).toBe(0);
+    expect(existsSync(join(failJob.worktree, "uncommitted-builder.txt"))).toBe(true);
+    expect(existsSync(join(revJob.worktree, "scratch.txt"))).toBe(true);
+    expect(existsSync(slowJob.worktree)).toBe(true);
+
+    expect(runCrew(t, ["cancel", slowId]).exitCode).toBe(0);
+
+    // 4. Clean removes builder worktree when local branch was deleted
+    installFakeAgy(t.binDir, `echo '{"conversation_id":"c-del","result":"Status: DONE\\nok"}'`);
+    const delStart = runCrew(t, ["start", "--role", "builder", "--brief", briefPath, "--branch", "feat/local-del"]);
+    expect(delStart.exitCode).toBe(0);
+    const delId = extractJobId(delStart.stdout);
+    expect(runCrew(t, ["wait", delId, "--timeout", "10s"]).exitCode).toBe(0);
+    const delJob = JSON.parse(
+      readFileSync(join(t.repo, ".crew", "jobs", `${delId}.json`), "utf8"),
+    ) as { worktree: string };
+
+    writeFileSync(join(delJob.worktree, "committed.txt"), "hi\n", "utf8");
+    Bun.spawnSync(["git", "add", "committed.txt"], { cwd: delJob.worktree, env: t.env });
+    Bun.spawnSync(["git", "commit", "-m", "temp commit"], { cwd: delJob.worktree, env: t.env });
+    // Detach the worktree and delete the local branch ref
+    Bun.spawnSync(["git", "checkout", "--detach"], { cwd: delJob.worktree, env: t.env });
+    Bun.spawnSync(["git", "branch", "-D", "feat/local-del"], { cwd: t.repo, env: t.env });
+
+    const clean2 = runCrew(t, ["clean"]);
+    expect(clean2.exitCode).toBe(0);
+    expect(existsSync(delJob.worktree)).toBe(false);
+  });
+
+  test("concurrent builder start on the same branch/worktree is rejected with WORKTREE_IN_USE", () => {
+    const t = setupRepo();
+    installFakeAgy(t.binDir, `sleep 30\necho '{"result":"Status: DONE"}'`);
+    const briefPath = join(t.repo, "brief.md");
+    writeFileSync(briefPath, "Task.\n", "utf8");
+
+    const s1 = runCrew(t, ["start", "--role", "builder", "--brief", briefPath, "--branch", "feat/shared"]);
+    expect(s1.exitCode).toBe(0);
+    const id1 = extractJobId(s1.stdout);
+
+    // Worktree is still clean (sleep 30 wrote no files), yet second start must be refused
+    const s2 = runCrew(t, ["start", "--role", "builder", "--brief", briefPath, "--branch", "feat/shared"]);
+    expect(s2.exitCode).toBe(1);
+    const err2 = JSON.parse(s2.stderr) as { code: string };
+    expect(err2.code).toBe("WORKTREE_IN_USE");
+
+    expect(runCrew(t, ["cancel", id1]).exitCode).toBe(0);
+  });
+
+  test("cancel kills grandchild processes in the process group even if worker ignores SIGTERM, and refuses finished jobs", async () => {
+    const t = setupRepo();
+    const grandchildPidFile = join(t.root, "grandchild.pid");
+    installFakeAgy(
+      t.binDir,
+      `
+trap '' TERM
+sleep 60 &
+echo "$!" > "${grandchildPidFile}"
+wait
+`,
+    );
+    const briefPath = join(t.repo, "brief.md");
+    writeFileSync(briefPath, "Ignore SIGTERM.\n", "utf8");
+
+    const start = runCrew(t, ["start", "--role", "builder", "--brief", briefPath, "--branch", "feat/sigkill"]);
+    expect(start.exitCode).toBe(0);
+    const jobId = extractJobId(start.stdout);
+
+    // Wait for grandchild PID file to appear
+    const deadline = Date.now() + 3000;
+    let grandchildPid = 0;
+    while (Date.now() < deadline) {
+      if (existsSync(grandchildPidFile)) {
+        const raw = readFileSync(grandchildPidFile, "utf8").trim();
+        if (raw && Number(raw) > 0) {
+          grandchildPid = Number(raw);
+          break;
+        }
+      }
+      await Bun.sleep(25);
+    }
+    expect(grandchildPid).toBeGreaterThan(0);
+
+    const cancel = runCrew(t, ["cancel", jobId]);
+    expect(cancel.exitCode).toBe(0);
+
+    // Grandchild process in the group must be dead
+    let alive = true;
+    try {
+      process.kill(grandchildPid, 0);
+    } catch {
+      alive = false;
+    }
+    expect(alive).toBe(false);
+
+    // Canceling an already-finished "done" job must not overwrite "done"
+    installFakeAgy(t.binDir, `echo '{"conversation_id":"c-done","result":"Status: DONE\\nok"}'`);
+    const startDone = runCrew(t, ["start", "--role", "builder", "--brief", briefPath, "--branch", "feat/already-done"]);
+    expect(startDone.exitCode).toBe(0);
+    const doneId = extractJobId(startDone.stdout);
+    expect(runCrew(t, ["wait", doneId, "--timeout", "10s"]).exitCode).toBe(0);
+
+    const cancelDone = runCrew(t, ["cancel", doneId]);
+    expect(cancelDone.exitCode).toBe(1);
+    const cancelErr = JSON.parse(cancelDone.stderr) as { code: string };
+    expect(cancelErr.code).toBe("JOB_NOT_RUNNING");
+
+    const doneRecord = JSON.parse(
+      readFileSync(join(t.repo, ".crew", "jobs", `${doneId}.json`), "utf8"),
+    ) as { status: string };
+    expect(doneRecord.status).toBe("done");
+  });
+
+  test("timeout without conversationId enters error (exit 3), and continue command shell-quotes brief path with spaces", () => {
+    const t = setupRepo(undefined, "repo with spaces");
+    const briefPath = join(t.repo, "my brief.md");
+    writeFileSync(briefPath, "Task with spaces.\n", "utf8");
+
+    // 1. Timeout without conversationId (stderr-matched, non-JSON) -> error (exit 3), no --continue
+    installFakeAgy(
+      t.binDir,
+      `
+echo "Operation timed out waiting for model" >&2
+exit 1
+`,
+    );
+    const startNoConv = runCrew(t, ["start", "--role", "builder", "--brief", briefPath, "--branch", "feat/no-conv"]);
+    expect(startNoConv.exitCode).toBe(0);
+    const noConvId = extractJobId(startNoConv.stdout);
+
+    const waitNoConv = runCrew(t, ["wait", noConvId, "--timeout", "10s"]);
+    expect(waitNoConv.exitCode).toBe(3);
+    expect(waitNoConv.stdout).not.toContain("--continue");
+
+    const resNoConv = runCrew(t, ["result", noConvId]);
+    expect(resNoConv.exitCode).toBe(3);
+    expect(resNoConv.stdout).not.toContain("--continue");
+
+    // 2. Resumable timeout with conversationId in repo path containing spaces -> shell-quoted Next command works
+    installFakeAgy(
+      t.binDir,
+      `echo '{"conversation_id":"conv-spaces-1","subtype":"timeout","result":"Paused."}'`,
+    );
+    const startSpaces = runCrew(t, ["start", "--role", "builder", "--brief", briefPath, "--branch", "feat/spaces"]);
+    expect(startSpaces.exitCode).toBe(0);
+    const spacesId = extractJobId(startSpaces.stdout);
+
+    const waitSpaces = runCrew(t, ["wait", spacesId, "--timeout", "10s"]);
+    expect(waitSpaces.exitCode).toBe(5);
+    const resSpaces = runCrew(t, ["result", spacesId]);
+    expect(resSpaces.exitCode).toBe(5);
+
+    const nextLine = resSpaces.stdout.split("\n").find((l) => l.startsWith("Next: "));
+    expect(nextLine).toBeDefined();
+    const nextCmd = (nextLine ?? "").slice("Next: ".length);
+    expect(nextCmd).toContain(`'${briefPath}'`);
+
+    // Actually execute the printed Next command through bash to prove quoting works
+    installFakeAgy(
+      t.binDir,
+      `echo '{"conversation_id":"conv-spaces-1","result":"Status: DONE\\nResumed ok."}'`,
+    );
+    const rewrittenCmd = nextCmd.replace("claude-agent-crew/runner/crew.ts", CREW_TS);
+    const resumed = Bun.spawnSync(["bash", "-c", rewrittenCmd], {
+      cwd: t.repo,
+      env: t.env,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    expect(resumed.exitCode).toBe(0);
+    const resumedId = extractJobId(resumed.stdout.toString());
+    expect(runCrew(t, ["wait", resumedId, "--timeout", "10s"]).exitCode).toBe(0);
+  });
+
+  test("list, no-arg status, result exit codes (2, 4, 5), syncJobLiveness crash recovery, and missing agy log", async () => {
+    const t = setupRepo();
+    const briefPath = join(t.repo, "brief.md");
+    writeFileSync(briefPath, "Task.\n", "utf8");
+
+    // Empty list and no-arg status
+    const emptyList = runCrew(t, ["list"]);
+    expect(emptyList.exitCode).toBe(0);
+    expect(emptyList.stdout).toContain("No crew jobs recorded.");
+
+    const emptyStatus = runCrew(t, ["status"]);
+    expect(emptyStatus.exitCode).toBe(0);
+    expect(emptyStatus.stdout).toContain("No crew jobs recorded.");
+
+    // result exit code 2 while running, 4 when canceled
+    installFakeAgy(t.binDir, `sleep 30\necho '{"result":"Status: DONE"}'`);
+    const sRun = runCrew(t, ["start", "--role", "builder", "--brief", briefPath, "--branch", "feat/res-codes"]);
+    expect(sRun.exitCode).toBe(0);
+    const runId = extractJobId(sRun.stdout);
+
+    const resRunning = runCrew(t, ["result", runId]);
+    expect(resRunning.exitCode).toBe(2);
+    const runningErr = JSON.parse(resRunning.stderr) as { code: string };
+    expect(runningErr.code).toBe("JOB_STILL_RUNNING");
+
+    // list and no-arg status show the running job
+    const listOut = runCrew(t, ["list"]);
+    expect(listOut.exitCode).toBe(0);
+    expect(listOut.stdout).toContain(runId);
+    const statusNoArg = runCrew(t, ["status"]);
+    expect(statusNoArg.exitCode).toBe(0);
+    expect(statusNoArg.stdout).toContain(runId);
+
+    expect(runCrew(t, ["cancel", runId]).exitCode).toBe(0);
+    await Bun.sleep(50);
+    const resCanceled = runCrew(t, ["result", runId]);
+    expect(resCanceled.exitCode).toBe(4);
+    expect(resCanceled.stdout).toContain("Status: CANCELED");
+
+    // syncJobLiveness crash recovery: dead PID AND recycled unrelated PID
+    const jobPath = join(t.repo, ".crew", "jobs", `${runId}.json`);
+    const baseRec = JSON.parse(readFileSync(jobPath, "utf8")) as Record<string, unknown>;
+    writeFileSync(
+      jobPath,
+      JSON.stringify({ ...baseRec, status: "running", end: null, exit: null, pid: 9999999 }, null, 2),
+      "utf8",
+    );
+    const crashedDead = runCrew(t, ["wait", runId, "--timeout", "1s"]);
+    expect(crashedDead.exitCode).toBe(3);
+
+    // Now test recycled PID (an unrelated running sleep process)
+    const sleepProc = Bun.spawn(["sleep", "30"], { stdout: "ignore", stderr: "ignore" });
+    spawnedPids.push(sleepProc.pid);
+    writeFileSync(
+      jobPath,
+      JSON.stringify({ ...baseRec, status: "running", end: null, exit: null, pid: sleepProc.pid }, null, 2),
+      "utf8",
+    );
+    const crashedRecycled = runCrew(t, ["result", runId]);
+    expect(crashedRecycled.exitCode).toBe(3);
+    expect(crashedRecycled.stdout).toContain("Status: ERROR");
+
+    // Missing agy on PATH writes log file and error status instead of missing log
+    const noAgyBin = join(t.root, "no-agy-bin");
+    mkdirSync(noAgyBin, { recursive: true });
+    for (const tool of ["git", "ps"]) {
+      const bin = Bun.which(tool);
+      if (bin) symlinkSync(bin, join(noAgyBin, tool));
+    }
+    const noAgyEnv: TestEnv = {
+      ...t,
+      env: { ...t.env, PATH: noAgyBin },
+    };
+    const noAgyStart = runCrew(noAgyEnv, ["start", "--role", "builder", "--brief", briefPath, "--branch", "feat/no-agy"]);
+    expect(noAgyStart.exitCode).toBe(0);
+    const noAgyId = extractJobId(noAgyStart.stdout);
+    const noAgyWait = runCrew(noAgyEnv, ["wait", noAgyId, "--timeout", "5s"]);
+    expect(noAgyWait.exitCode).toBe(3);
+    const logFile = join(t.repo, ".crew", "logs", `${noAgyId}.log`);
+    expect(existsSync(logFile)).toBe(true);
+    expect(readFileSync(logFile, "utf8").length).toBeGreaterThan(0);
+  });
+
+  test("CLI validation, --help flags, _exec error payload, and parseAgyOutput fallback ignoring trailing primitives", () => {
+    const t = setupRepo();
+    const briefPath = join(t.repo, "brief.md");
+    writeFileSync(briefPath, "Task.\n", "utf8");
+
+    // --help works on root and subcommands
+    expect(runCrew(t, ["--help"]).exitCode).toBe(0);
+    expect(runCrew(t, ["start", "--help"]).exitCode).toBe(0);
+    expect(runCrew(t, ["list", "--help"]).exitCode).toBe(0);
+
+    // start input validation errors
+    const missingRole = runCrew(t, ["start", "--brief", briefPath]);
+    expect(missingRole.exitCode).toBe(1);
+    expect((JSON.parse(missingRole.stderr) as { code: string }).code).toBe("MISSING_ROLE");
+
+    const missingBrief = runCrew(t, ["start", "--role", "builder"]);
+    expect(missingBrief.exitCode).toBe(1);
+    expect((JSON.parse(missingBrief.stderr) as { code: string }).code).toBe("MISSING_BRIEF");
+
+    const badBrief = runCrew(t, ["start", "--role", "builder", "--brief", join(t.repo, "nope.md")]);
+    expect(badBrief.exitCode).toBe(1);
+    expect((JSON.parse(badBrief.stderr) as { code: string }).code).toBe("BRIEF_NOT_FOUND");
+
+    const badRole = runCrew(t, ["start", "--role", "wizard", "--brief", briefPath]);
+    expect(badRole.exitCode).toBe(1);
+    expect((JSON.parse(badRole.stderr) as { code: string }).code).toBe("UNKNOWN_ROLE");
+
+    const badTimeout = runCrew(t, ["start", "--role", "builder", "--brief", briefPath, "--timeout", "bogus"]);
+    expect(badTimeout.exitCode).toBe(1);
+    expect((JSON.parse(badTimeout.stderr) as { code: string }).code).toBe("INVALID_TIMEOUT");
+
+    const zeroTimeout = runCrew(t, ["start", "--role", "builder", "--brief", briefPath, "--timeout", "0s"]);
+    expect(zeroTimeout.exitCode).toBe(1);
+    expect((JSON.parse(zeroTimeout.stderr) as { code: string }).code).toBe("INVALID_TIMEOUT");
+
+    const unknownFlag = runCrew(t, ["start", "--bogus", "1"]);
+    expect(unknownFlag.exitCode).toBe(1);
+    expect((JSON.parse(unknownFlag.stderr) as { code: string }).code).toBe("UNKNOWN_FLAG");
+
+    const extraArg = runCrew(t, ["list", "extra"]);
+    expect(extraArg.exitCode).toBe(1);
+    expect((JSON.parse(extraArg.stderr) as { code: string }).code).toBe("UNEXPECTED_ARGUMENT");
+
+    // _exec with missing job-id emits structured JSON error
+    const execNoId = runCrew(t, ["_exec"]);
+    expect(execNoId.exitCode).toBe(1);
+    expect((JSON.parse(execNoId.stderr) as { code: string }).code).toBe("MISSING_JOB_ID");
+
+    // parseAgyOutput fallback skips trailing JSON primitives like 0 or "ok"
+    installFakeAgy(
+      t.binDir,
+      `
+echo "Diagnostic log line"
+echo '{"conversation_id":"c-fb","result":"Status: DONE\\nFound object."}'
+echo '0'
+echo '"ok"'
+`,
+    );
+    const fbStart = runCrew(t, ["start", "--role", "builder", "--brief", briefPath, "--branch", "feat/fallback"]);
+    expect(fbStart.exitCode).toBe(0);
+    const fbId = extractJobId(fbStart.stdout);
+    expect(runCrew(t, ["wait", fbId, "--timeout", "10s"]).exitCode).toBe(0);
+    const fbRes = runCrew(t, ["result", fbId]);
+    expect(fbRes.exitCode).toBe(0);
+    expect(fbRes.stdout).toContain("Found object.");
   });
 });
