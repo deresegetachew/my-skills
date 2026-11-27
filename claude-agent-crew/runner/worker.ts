@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { UsageMetrics } from "./types.ts";
 import { CrewCliError } from "./types.ts";
@@ -448,4 +449,21 @@ export function parseAgyOutput(
     timedOut,
     validJson: true,
   };
+}
+
+/**
+ * The environment for a `claude -p` job. A long-lived token from `claude setup-token`, saved by the human in
+ * `~/.config/crew/claude-oauth-token` (mode 600), is passed as CLAUDE_CODE_OAUTH_TOKEN unless the environment already
+ * has one. The token is never printed or logged.
+ */
+export function claudeJobEnv(base: NodeJS.ProcessEnv, extra: Record<string, string>): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...base, ...extra };
+  if (!env.CLAUDE_CODE_OAUTH_TOKEN) {
+    const file = join(base.HOME ?? homedir(), ".config", "crew", "claude-oauth-token");
+    if (existsSync(file)) {
+      const token = readFileSync(file, "utf8").trim();
+      if (token) env.CLAUDE_CODE_OAUTH_TOKEN = token;
+    }
+  }
+  return env;
 }

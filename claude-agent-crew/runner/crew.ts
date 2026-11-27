@@ -35,6 +35,7 @@ import {
   assertWorkerSupported,
   buildAgyArgs,
   buildClaudeArgs,
+  claudeJobEnv,
   buildSshCrewCommand,
   buildSshStartCommand,
   crewRootForWorkers,
@@ -969,7 +970,9 @@ async function cmdExec(repoRoot: string, args: string[]): Promise<number> {
       stdin: isClaude ? new Blob([briefText]) : "ignore",
       stdout: "pipe",
       stderr: "pipe",
-      env: isClaude ? { ...process.env, CREW_ROOT: crewRootForWorkers(), CREW_BUN: process.execPath } : process.env,
+      env: isClaude
+        ? claudeJobEnv(process.env, { CREW_ROOT: crewRootForWorkers(), CREW_BUN: process.execPath })
+        : process.env,
     });
     activeProc = proc;
 
