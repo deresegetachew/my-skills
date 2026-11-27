@@ -171,7 +171,7 @@ export function isUnderWorktreesDir(repoRoot: string, wtPath: string): boolean {
 }
 
 export function validateBranchName(repoRoot: string, branch: string, readOnly: boolean): void {
-  if (!branch.trim() || branch.startsWith("-")) {
+  if (!branch.trim() || branch.trim().startsWith("-")) {
     throw new CrewCliError(
       "INVALID_BRANCH",
       `Invalid branch or ref "${branch}".`,
@@ -488,6 +488,10 @@ export function cleanFinishedWorktrees(
     }
 
     const wtInfo = trackedMap.get(canonWt);
+    if (wtInfo?.detached && localBranchExists(repoRoot, branch)) {
+      kept.push({ worktree: wt, reason: "builder worktree is in detached HEAD state" });
+      continue;
+    }
     const effectiveBranch = wtInfo?.branch ?? branch;
 
     if (localBranchExists(repoRoot, effectiveBranch)) {

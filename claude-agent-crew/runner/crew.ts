@@ -426,7 +426,7 @@ async function cmdStart(repoRoot: string, args: string[]): Promise<number> {
       sshCommand: machineTarget,
       remotePath,
       role,
-      briefArg: toRemoteBriefPath(repoRoot, briefPath),
+      briefArg: toRemoteBriefPath(repoRoot, briefPath, remotePath),
       branch,
       continueJobId: continueId,
       timeout,
@@ -771,6 +771,9 @@ async function cmdExec(repoRoot: string, args: string[]): Promise<number> {
         });
       }
       return 4;
+    }
+    if (latest && latest.status !== "running") {
+      return exitCodeForStatus(latest.status);
     }
 
     const parsed = parseAgyOutput(stdoutText, stderrText);
@@ -1189,28 +1192,32 @@ async function cmdCancel(repoRoot: string, args: string[]): Promise<number> {
         exit: 143,
       });
     } else {
-      const errText = res.stderr.toString().trim();
-      try {
-        const parsedErr: unknown = JSON.parse(errText);
-        if (
-          typeof parsedErr === "object" &&
-          parsedErr !== null &&
-          "code" in parsedErr &&
-          (parsedErr as { code?: unknown }).code === "JOB_NOT_RUNNING" &&
-          "message" in parsedErr &&
-          typeof (parsedErr as { message?: unknown }).message === "string"
-        ) {
-          const msg = (parsedErr as { message: string }).message;
-          const m = /\(status:\s*(done|error|canceled|attention)\)|status\s+"(done|error|canceled|attention)"/.exec(
-            msg,
-          );
-          const remoteStatus = (m?.[1] ?? m?.[2]) as JobStatus | undefined;
-          if (remoteStatus) {
-            syncRemoteJobStatus(repoRoot, raw, exitCodeForStatus(remoteStatus));
+      const errLines = res.stderr.toString().trim().split(/\r?\n/).reverse();
+      for (const line of errLines) {
+        if (!line.trim().startsWith("{")) continue;
+        try {
+          const parsedErr: unknown = JSON.parse(line);
+          if (
+            typeof parsedErr === "object" &&
+            parsedErr !== null &&
+            "code" in parsedErr &&
+            (parsedErr as { code?: unknown }).code === "JOB_NOT_RUNNING" &&
+            "message" in parsedErr &&
+            typeof (parsedErr as { message?: unknown }).message === "string"
+          ) {
+            const msg = (parsedErr as { message: string }).message;
+            const m = /\(status:\s*(done|error|canceled|attention)\)|status\s+"(done|error|canceled|attention)"/.exec(
+              msg,
+            );
+            const remoteStatus = (m?.[1] ?? m?.[2]) as JobStatus | undefined;
+            if (remoteStatus) {
+              syncRemoteJobStatus(repoRoot, raw, exitCodeForStatus(remoteStatus));
+              break;
+            }
           }
+        } catch {
+          // Non-JSON stderr line from SSH/remote
         }
-      } catch {
-        // Non-JSON stderr from SSH/remote
       }
     }
     return code;

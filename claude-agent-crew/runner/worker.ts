@@ -122,8 +122,14 @@ export function buildSshStartCommand(opts: {
   });
 }
 
-export function toRemoteBriefPath(repoRoot: string, briefFile: string): string {
+export function toRemoteBriefPath(repoRoot: string, briefFile: string, remotePath?: string): string {
   const abs = resolve(briefFile);
+  if (remotePath) {
+    const remoteRel = relative(resolve(remotePath), abs);
+    if (remoteRel !== ".." && !remoteRel.startsWith(`..${sep}`) && !isAbsolute(remoteRel)) {
+      return remoteRel || ".";
+    }
+  }
   const rel = relative(resolve(repoRoot), abs);
   if (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel)) {
     return rel || ".";
@@ -155,16 +161,37 @@ function extractUsage(raw: unknown): UsageMetrics | null {
   return Object.keys(out).length > 0 ? out : null;
 }
 
-function extractLastJsonObject(text: string): Record<string, unknown> | null {
-  let last: Record<string, unknown> | null = null;
-  let i = 0;
-  let attempts = 0;
-  const maxAttempts = 500;
+const AGY_PAYLOAD_KEYS = [
+  "conversation_id",
+  "conversationId",
+  "session_id",
+  "sessionId",
+  "result",
+  "response",
+  "text",
+  "output",
+  "subtype",
+  "timed_out",
+  "timedOut",
+  "is_error",
+  "isError",
+  "usage",
+];
 
-  while (i < text.length && attempts < maxAttempts) {
+function isAgyPayloadObject(obj: Record<string, unknown>): boolean {
+  return AGY_PAYLOAD_KEYS.some((k) => Object.prototype.hasOwnProperty.call(obj, k));
+}
+
+function extractLastJsonObject(text: string): Record<string, unknown> | null {
+  let lastAny: Record<string, unknown> | null = null;
+  let lastPayload: Record<string, unknown> | null = null;
+  let i = 0;
+  let failedAttempts = 0;
+  const maxFailedAttempts = 2000;
+
+  while (i < text.length && failedAttempts < maxFailedAttempts) {
     const start = text.indexOf("{", i);
     if (start === -1) break;
-    attempts++;
 
     let depth = 0;
     let inString = false;
@@ -200,7 +227,10 @@ function extractLastJsonObject(text: string): Record<string, unknown> | null {
       try {
         const candidate: unknown = JSON.parse(text.slice(start, matchedEnd + 1));
         if (isRecord(candidate)) {
-          last = candidate;
+          lastAny = candidate;
+          if (isAgyPayloadObject(candidate)) {
+            lastPayload = candidate;
+          }
           i = matchedEnd + 1;
           continue;
         }
@@ -208,10 +238,11 @@ function extractLastJsonObject(text: string): Record<string, unknown> | null {
         // Not valid JSON; advance past this '{'
       }
     }
+    failedAttempts++;
     i = start + 1;
   }
 
-  return last;
+  return lastPayload ?? lastAny;
 }
 
 export function parseAgyOutput(stdoutText: string, stderrText = ""): ParsedWorkerOutput {

@@ -1878,4 +1878,191 @@ bash -c "$rewritten"
     const listAfter = runCrew(t, ["list"]);
     expect(listAfter.stdout).toContain(`${fastId}\tdone`);
   });
+
+  test("cmdStart >2s _exec startup timeout kills child PGID and records EXEC_START_FAILED", async () => {
+    const t = setupRepo();
+    const briefPath = join(t.repo, "brief.md");
+    writeFileSync(briefPath, "Task.\n", "utf8");
+    const agyMarker = join(t.root, "timeout-kill-agy.txt");
+    installFakeAgy(
+      t.binDir,
+      `touch "${agyMarker}"\necho '{"conversation_id":"c1","result":"Status: DONE\\nok"}'`,
+    );
+
+    const realGit = Bun.which("git") ?? "/usr/bin/git";
+    const stalledPidsFile = join(t.root, "stalled-pids.txt");
+    const gitShim = join(t.binDir, "git");
+    writeFileSync(
+      gitShim,
+      `#!/usr/bin/env bash
+parent_args="$(ps -ww -o args= -p "$PPID" 2>/dev/null || true)"
+if [[ "$parent_args" == *" _exec "* ]]; then
+  printf '%s %s\\n' "$$" "$PPID" > "${stalledPidsFile}"
+  exec sleep 30
+fi
+exec "${realGit}" "$@"
+`,
+      "utf8",
+    );
+    chmodSync(gitShim, 0o755);
+
+    const stalledStart = runCrew(t, ["start", "--role", "builder", "--brief", briefPath, "--branch", "feat/stall"]);
+    expect(stalledStart.exitCode).toBe(1);
+    const err = JSON.parse(stalledStart.stderr) as { code: string };
+    expect(err.code).toBe("EXEC_START_FAILED");
+    expect(existsSync(agyMarker)).toBe(false);
+
+    // Ensure both the _exec supervisor and its stalled git child were killed
+    expect(existsSync(stalledPidsFile)).toBe(true);
+    const [shimPidStr, execPidStr] = readFileSync(stalledPidsFile, "utf8").trim().split(/\s+/);
+    const shimPid = Number(shimPidStr);
+    const execPid = Number(execPidStr);
+    spawnedPids.push(shimPid, execPid);
+
+    await Bun.sleep(50);
+    for (const pid of [shimPid, execPid]) {
+      let alive = true;
+      try {
+        process.kill(pid, 0);
+      } catch {
+        alive = false;
+      }
+      expect(alive).toBe(false);
+    }
+
+    const jobFiles = readdirSync(join(t.repo, ".crew", "jobs")).filter((f) => f.endsWith(".json"));
+    expect(jobFiles.length).toBe(1);
+    const recorded = JSON.parse(readFileSync(join(t.repo, ".crew", "jobs", jobFiles[0]!), "utf8")) as {
+      status: string;
+      error: { code: string } | null;
+    };
+    expect(recorded.status).toBe("error");
+    expect(recorded.error?.code).toBe("EXEC_START_FAILED");
+  });
+
+  test("round-2 hardening: >500 log braces + trailing telemetry JSON, detached builder clean guard, leading-space branch, nested remotePath", () => {
+    const t = setupRepo();
+    const briefPath = join(t.repo, "brief.md");
+    writeFileSync(briefPath, "Task.\n", "utf8");
+
+    // 1. >550 '{' diagnostic lines before real JSON AND trailing telemetry JSON object after it
+    const manyLogs = Array.from({ length: 550 }, (_, idx) => `echo '[diag ${idx}] {"step":${idx}}'`).join("\n");
+    installFakeAgy(
+      t.binDir,
+      `
+${manyLogs}
+echo '{"conversation_id":"c-hardened","result":"Status: DONE\\nSurvived noisy logs."}'
+echo '[telemetry] {"duration_ms":42}'
+`,
+    );
+    const noisyStart = runCrew(t, ["start", "--role", "builder", "--brief", briefPath, "--branch", "feat/noisy"]);
+    expect(noisyStart.exitCode).toBe(0);
+    const noisyId = extractJobId(noisyStart.stdout);
+    expect(runCrew(t, ["wait", noisyId, "--timeout", "10s"]).exitCode).toBe(0);
+    const noisyRes = runCrew(t, ["result", noisyId]);
+    expect(noisyRes.exitCode).toBe(0);
+    expect(noisyRes.stdout.split("\n")[0]).toBe("Status: DONE");
+    expect(noisyRes.stdout).toContain("Survived noisy logs.");
+
+    const noisyJob = JSON.parse(readFileSync(join(t.repo, ".crew", "jobs", `${noisyId}.json`), "utf8")) as {
+      conversationId: string | null;
+      worktree: string;
+    };
+    expect(noisyJob.conversationId).toBe("c-hardened");
+
+    // 2. Detached HEAD builder worktree is NOT removed by clean even when job.branch is merged
+    writeFileSync(join(noisyJob.worktree, "merged.txt"), "merged\n", "utf8");
+    Bun.spawnSync(["git", "add", "merged.txt"], { cwd: noisyJob.worktree, env: t.env });
+    Bun.spawnSync(["git", "commit", "-m", "merged commit"], { cwd: noisyJob.worktree, env: t.env });
+    Bun.spawnSync(["git", "merge", "--no-ff", "feat/noisy", "-m", "merge noisy"], { cwd: t.repo, env: t.env });
+    Bun.spawnSync(["git", "checkout", "--detach", "HEAD"], { cwd: noisyJob.worktree, env: t.env });
+
+    const cleanDetached = runCrew(t, ["clean"]);
+    expect(cleanDetached.exitCode).toBe(0);
+    expect(existsSync(noisyJob.worktree)).toBe(true);
+    expect(cleanDetached.stdout).toContain("detached HEAD");
+
+    // 3. Leading-space '-' branch is rejected with INVALID_BRANCH for reviewer as well
+    const spaceDash = runCrew(t, ["start", "--role", "reviewer", "--brief", briefPath, "--branch", " -foo"]);
+    expect(spaceDash.exitCode).toBe(1);
+    expect((JSON.parse(spaceDash.stderr) as { code: string }).code).toBe("INVALID_BRANCH");
+
+    // 4. Nested remotePath under local repoRoot preserves remote-relative brief path
+    const nestedRemote = join(t.repo, "nested-remote");
+    mkdirSync(join(nestedRemote, ".claude"), { recursive: true });
+    const nGit = (args: string[]): void => {
+      const r = Bun.spawnSync(["git", ...args], { cwd: nestedRemote, env: t.env, stdout: "pipe", stderr: "pipe" });
+      if (r.exitCode !== 0) throw new Error(r.stderr.toString());
+    };
+    nGit(["init", "-b", "main"]);
+    nGit(["config", "user.email", "test@example.com"]);
+    nGit(["config", "user.name", "Test User"]);
+    nGit(["config", "commit.gpgsign", "false"]);
+    writeFileSync(join(nestedRemote, "README.md"), "# Nested\n", "utf8");
+    writeFileSync(join(nestedRemote, "brief.md"), "Nested remote brief.\n", "utf8");
+    writeFileSync(
+      join(nestedRemote, ".claude", "crew.json"),
+      JSON.stringify(
+        {
+          roles: { remote: { worker: "agy", machine: "dev-pc" } },
+          machines: { local: "local", "dev-pc": "ssh factory@dev-pc" },
+          paths: { "dev-pc": nestedRemote },
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+    nGit(["add", "README.md", "brief.md", ".claude/crew.json"]);
+    nGit(["commit", "-m", "nested init"]);
+
+    writeFileSync(
+      join(t.repo, ".claude", "crew.json"),
+      JSON.stringify(
+        {
+          roles: { remote: { worker: "agy", machine: "dev-pc" } },
+          machines: { local: "local", "dev-pc": "ssh factory@dev-pc" },
+          paths: { "dev-pc": nestedRemote },
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+    const sshBin = join(t.binDir, "ssh");
+    writeFileSync(
+      sshBin,
+      `#!/usr/bin/env bash
+set -euo pipefail
+remote_cmd="\${@: -1}"
+rewritten="\${remote_cmd//claude-agent-crew\\/runner\\/crew.ts/${CREW_TS}}"
+bash -c "$rewritten"
+`,
+      "utf8",
+    );
+    chmodSync(sshBin, 0o755);
+
+    installFakeAgy(
+      t.binDir,
+      `echo '{"conversation_id":"nested-attn-1","subtype":"timeout","result":"Paused nested."}'`,
+    );
+    const nStart = runCrew(t, ["start", "--role", "remote", "--brief", briefPath, "--branch", "feat/nested"]);
+    expect(nStart.exitCode).toBe(0);
+    const nId = extractJobId(nStart.stdout);
+    const nWait = runCrew(t, ["wait", nId, "--timeout", "10s"]);
+    expect(nWait.exitCode).toBe(5);
+    const nextCmd = nWait.stdout.split("\n").find((l) => l.startsWith("Next: "))?.slice("Next: ".length) ?? "";
+    expect(nextCmd).toContain(nestedRemote);
+
+    installFakeAgy(t.binDir, `echo '{"conversation_id":"nested-attn-1","result":"Status: DONE\\nNested resumed."}'`);
+    const nResumed = Bun.spawnSync(["bash", "-c", nextCmd.replace("claude-agent-crew/runner/crew.ts", CREW_TS)], {
+      cwd: t.repo,
+      env: t.env,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    expect(nResumed.exitCode).toBe(0);
+    const nResumedId = extractJobId(nResumed.stdout.toString());
+    expect(runCrew(t, ["wait", nResumedId, "--timeout", "10s"]).exitCode).toBe(0);
+  });
 });
