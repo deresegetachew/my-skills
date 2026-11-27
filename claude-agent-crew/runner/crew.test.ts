@@ -2368,7 +2368,7 @@ bash -c "$rewritten"
     expect(existsSync(marker)).toBe(false);
   }, 60_000);
 
-  test("remote start: brief outside the repo is refused, invalid remote job id is rejected, hung ssh times out, list refreshes remote status", () => {
+  test("remote start: brief outside the repo is copied over, invalid remote job id is rejected, hung ssh times out, list refreshes remote status", () => {
     const t = setupRepo();
     const sshLog = join(t.root, "ssh-calls.log");
     const sshBin = join(t.binDir, "ssh");
@@ -2379,14 +2379,21 @@ bash -c "$rewritten"
     const briefPath = join(t.repo, "brief.md");
     writeFileSync(briefPath, "Task.\n", "utf8");
 
-    // 1. Brief outside both repos: refused before any ssh call
-    writeSsh(`echo "Started job remote-20260101-000000-abcd"`);
+    // 1. Brief outside both repos: its contents are copied to .crew/briefs on the remote, then started from there
+    const copied = join(t.root, "copied-brief.md");
+    writeSsh(`if [[ "$remote_cmd" == *"cat > "* ]]; then cat > "${copied}"; exit 0; fi
+echo "Started job remote-20260101-000000-abcd"`);
     const outsideBrief = join(t.root, "outside-brief.md");
-    writeFileSync(outsideBrief, "Task.\n", "utf8");
+    writeFileSync(outsideBrief, "Outside task.\n", "utf8");
     const outside = runCrew(t, ["start", "--role", "remote", "--brief", outsideBrief]);
-    expect(outside.exitCode).toBe(1);
-    expect(errorCode(outside.stderr)).toBe("REMOTE_BRIEF_OUTSIDE_REPO");
-    expect(existsSync(sshLog)).toBe(false);
+    expect(outside.exitCode).toBe(0);
+    expect(readFileSync(copied, "utf8")).toBe("Outside task.\n");
+    const calls = readFileSync(sshLog, "utf8").trim().split("\n");
+    const copyPath = /cat > '?(\.crew\/briefs\/brief-[0-9a-f-]+\.md)/.exec(calls[0] ?? "")?.[1];
+    expect(copyPath).toBeDefined();
+    expect(calls[1]).toContain(`'--brief' '${copyPath}'`);
+    rmSync(sshLog);
+    rmSync(join(t.repo, ".crew", "jobs"), { recursive: true, force: true });
 
     // 2. A remote returning a path-like job id must not make the runner write outside .crew/jobs
     writeSsh(`echo "Started job ../../escape"`);

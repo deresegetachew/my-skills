@@ -377,13 +377,19 @@ interface SshResult {
 function runSsh(
   cmd: string[],
   failure: { code: string; what: string; target: string },
-  opts: { extraMs?: number; maxMs?: number } = {},
+  opts: { extraMs?: number; maxMs?: number; stdin?: Buffer } = {},
 ): SshResult {
   const base = envMs("CREW_SSH_TIMEOUT_MS", 60_000);
   const timeoutMs = Math.min(base, opts.maxMs ?? base) + (opts.extraMs ?? 0);
   let res: ReturnType<typeof Bun.spawnSync>;
   try {
-    res = Bun.spawnSync(cmd, { stdout: "pipe", stderr: "pipe", timeout: timeoutMs, killSignal: "SIGKILL" });
+    res = Bun.spawnSync(cmd, {
+      stdin: opts.stdin ?? "ignore",
+      stdout: "pipe",
+      stderr: "pipe",
+      timeout: timeoutMs,
+      killSignal: "SIGKILL",
+    });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     throw new CrewCliError(
@@ -562,13 +568,25 @@ async function cmdStart(repoRoot: string, args: string[]): Promise<number> {
         `Add "paths": { "${machineName}": "/path/to/repo" } in .claude/crew.json.`,
       );
     }
-    const remoteBrief = toRemoteBriefPath(repoRoot, briefPath, remotePath);
+    let remoteBrief = toRemoteBriefPath(repoRoot, briefPath, remotePath);
     if (isAbsolute(remoteBrief)) {
-      throw new CrewCliError(
-        "REMOTE_BRIEF_OUTSIDE_REPO",
-        `Brief ${briefPath} is not inside this repo or ${remotePath}, so it would not exist on "${machineName}".`,
-        `Move the brief into the repository, commit and push it so ${remotePath} on ${machineName} has it, then retry.`,
+      // A brief outside the repo (the usual case: the orchestrator's scratch folder) is copied to the remote.
+      remoteBrief = `.crew/briefs/brief-${Date.now()}-${randomBytes(3).toString("hex")}.md`;
+      const copy = runSsh(
+        [
+          ...machineTarget.trim().split(/\s+/).filter(Boolean),
+          `cd ${shellQuote(remotePath)} && mkdir -p .crew/briefs && cat > ${shellQuote(remoteBrief)}`,
+        ],
+        { code: "SSH_START_FAILED", what: "copying the brief", target: machineTarget },
+        { stdin: readFileSync(briefPath) },
       );
+      if (copy.exitCode !== 0) {
+        throw new CrewCliError(
+          "SSH_START_FAILED",
+          `Could not copy brief ${briefPath} to ${remotePath} on "${machineName}": ${copy.stderr.toString().trim()}`,
+          `Verify SSH connectivity (${machineTarget}) and that ${remotePath} exists on ${machineName}.`,
+        );
+      }
     }
     const sshCmd = buildSshStartCommand({
       sshCommand: machineTarget,

@@ -70,8 +70,9 @@ never removed under it.
 - A `timed out` line on stderr only means timeout when the worker exited non-zero.
 - `--continue` refuses a worktree whose branch was switched (`CONTINUE_BRANCH_CHANGED`) or that is outside
   `.crew/worktrees/`.
-- Remote roles (`machine` with an ssh target): the brief must be a file **inside the repository** and already
-  present on the remote (commit and push it); a brief elsewhere is refused (`REMOTE_BRIEF_OUTSIDE_REPO`).
+- Remote roles (`machine` with an ssh target): a brief inside the repository is passed by its path, so it must
+  already be on the remote. A brief anywhere else (such as the orchestrator's scratch folder) is copied over ssh to
+  `.crew/briefs/` in the remote repo first.
   Every ssh call has a timeout (`CREW_SSH_TIMEOUT_MS`, default 60 s; `wait` adds its own `--timeout`).
 - Environment knobs, mainly for tests: `CREW_LOCK_WAIT_MS` (default 5000), `CREW_PID_GRACE_MS`,
   `CREW_SSH_TIMEOUT_MS`.
