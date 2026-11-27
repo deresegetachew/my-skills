@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   existsSync,
   lstatSync,
@@ -169,8 +170,33 @@ export function isUnderWorktreesDir(repoRoot: string, wtPath: string): boolean {
   return isSubpath(resolve(worktreesDir(repoRoot)), resolve(wtPath));
 }
 
+export function validateBranchName(repoRoot: string, branch: string, readOnly: boolean): void {
+  if (!branch.trim() || branch.startsWith("-")) {
+    throw new CrewCliError(
+      "INVALID_BRANCH",
+      `Invalid branch or ref "${branch}".`,
+      "Pass a valid branch name not starting with '-' or omit --branch.",
+    );
+  }
+  if (!readOnly) {
+    const check = runGit(repoRoot, ["check-ref-format", "--branch", branch]);
+    if (check.exitCode !== 0) {
+      throw new CrewCliError(
+        "INVALID_BRANCH",
+        `Invalid git branch name "${branch}".`,
+        "Pass a valid git branch name (see `git help check-ref-format`) or omit --branch.",
+      );
+    }
+  }
+}
+
 function sanitizeBranchSlug(branch: string): string {
-  return branch.replace(/[^a-zA-Z0-9._-]+/g, "-");
+  const base = branch.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "branch";
+  if (base === branch && branch !== "." && branch !== "..") {
+    return base;
+  }
+  const hash = createHash("sha256").update(branch).digest("hex").slice(0, 8);
+  return `${base}-${hash}`;
 }
 
 export interface WorktreeAssignment {
@@ -205,6 +231,21 @@ export function prepareWorktree(
 ): WorktreeAssignment {
   const readOnly = isReadOnlyRole(opts.role);
   if (opts.continueJob) {
+    const prevReadOnly = isReadOnlyRole(opts.continueJob.role);
+    if (prevReadOnly !== readOnly) {
+      throw new CrewCliError(
+        "CONTINUE_ROLE_MISMATCH",
+        `Cannot continue ${prevReadOnly ? "read-only" : "builder"} job "${opts.continueJob.id}" (role "${opts.continueJob.role}") with ${readOnly ? "read-only" : "builder"} role "${opts.role}".`,
+        `Use role "${opts.continueJob.role}" with --continue ${opts.continueJob.id}, or start a fresh job without --continue.`,
+      );
+    }
+    if (opts.branch !== undefined && opts.branch !== opts.continueJob.branch) {
+      throw new CrewCliError(
+        "CONTINUE_BRANCH_MISMATCH",
+        `Cannot pass --branch "${opts.branch}" with --continue ${opts.continueJob.id} (recorded branch: ${opts.continueJob.branch ?? "none"}).`,
+        `Omit --branch to continue on "${opts.continueJob.branch ?? "HEAD"}", or start a fresh job without --continue.`,
+      );
+    }
     const prevWt = opts.continueJob.worktree;
     if (existsSync(prevWt)) {
       if (!isUnderWorktreesDir(repoRoot, prevWt)) {
@@ -244,8 +285,10 @@ export function prepareWorktree(
     }
   }
 
+  const requestedBranch = opts.branch ?? opts.continueJob?.branch ?? undefined;
+
   if (readOnly) {
-    const targetRef = opts.branch ?? "HEAD";
+    const targetRef = requestedBranch ?? "HEAD";
     const wtPath = join(worktreesDir(repoRoot), opts.jobId);
     if (!isUnderWorktreesDir(repoRoot, wtPath)) {
       throw new CrewCliError(
@@ -254,7 +297,7 @@ export function prepareWorktree(
         "Ensure .crew/worktrees/ is a directory inside the repository, not a symlink pointing outside.",
       );
     }
-    const addRes = runGit(repoRoot, ["worktree", "add", "--detach", wtPath, targetRef]);
+    const addRes = runGit(repoRoot, ["worktree", "add", "--detach", "--", wtPath, targetRef]);
     if (addRes.exitCode !== 0) {
       throw new CrewCliError(
         "WORKTREE_CREATE_FAILED",
@@ -262,10 +305,10 @@ export function prepareWorktree(
         `Verify that branch or ref "${targetRef}" exists in git and try again.`,
       );
     }
-    return { worktree: wtPath, branch: opts.branch ?? null, reused: false };
+    return { worktree: wtPath, branch: requestedBranch ?? null, reused: false };
   }
 
-  const branchName = opts.branch ?? `crew/${opts.jobId}`;
+  const branchName = requestedBranch ?? `crew/${opts.jobId}`;
   const matchingWorktrees = listWorktrees(repoRoot).filter((w) => w.branch === branchName);
   const external = matchingWorktrees.find((w) => !isUnderWorktreesDir(repoRoot, w.path));
   if (external) {
@@ -316,8 +359,8 @@ export function prepareWorktree(
   const branchExists =
     runGit(repoRoot, ["show-ref", "--verify", "--quiet", `refs/heads/${branchName}`]).exitCode === 0;
   const addArgs = branchExists
-    ? ["worktree", "add", wtPath, branchName]
-    : ["worktree", "add", "-b", branchName, wtPath, "HEAD"];
+    ? ["worktree", "add", "--", wtPath, branchName]
+    : ["worktree", "add", "-b", branchName, "--", wtPath, "HEAD"];
   const addRes = runGit(repoRoot, addArgs);
   if (addRes.exitCode !== 0) {
     throw new CrewCliError(
@@ -445,10 +488,7 @@ export function cleanFinishedWorktrees(
     }
 
     const wtInfo = trackedMap.get(canonWt);
-    const effectiveBranch =
-      !localBranchExists(repoRoot, branch) && wtInfo?.branch && wtInfo.branch !== branch
-        ? wtInfo.branch
-        : branch;
+    const effectiveBranch = wtInfo?.branch ?? branch;
 
     if (localBranchExists(repoRoot, effectiveBranch)) {
       const merged = isBranchMerged(repoRoot, effectiveBranch);

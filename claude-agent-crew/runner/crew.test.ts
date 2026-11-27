@@ -8,6 +8,7 @@ import {
   readFileSync,
   rmSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -1037,7 +1038,14 @@ echo '"ok"'
     expect(runCrew(t, ["wait", fbId, "--timeout", "10s"]).exitCode).toBe(0);
     const fbRes = runCrew(t, ["result", fbId]);
     expect(fbRes.exitCode).toBe(0);
+    expect(fbRes.stdout.split("\n")[0]).toBe("Status: DONE");
     expect(fbRes.stdout).toContain("Found object.");
+    expect(fbRes.stdout).not.toContain("Diagnostic log line");
+    expect(fbRes.stdout).not.toContain("{");
+    const fbJob = JSON.parse(readFileSync(join(t.repo, ".crew", "jobs", `${fbId}.json`), "utf8")) as {
+      conversationId: string | null;
+    };
+    expect(fbJob.conversationId).toBe("c-fb");
   });
 
   test("COLUMNS=80 does not truncate ps args and cancel kills orphaned PGID children after _exec death", async () => {
@@ -1314,5 +1322,560 @@ wait
     symlinkSync(join(t.root, "nonexistent-clean-target"), join(t.repo, ".crew", "worktrees"));
     const cleanDangling = runCrew(t, ["clean"]);
     expect(cleanDangling.exitCode).toBe(0);
+  });
+
+  test("syncJobLiveness treats surviving PGID children as alive after _exec death", async () => {
+    const t = setupRepo();
+    const childPidFile = join(t.root, "pgid-alive-child.pid");
+    installFakeAgy(
+      t.binDir,
+      `
+sleep 60 &
+echo "$!" > "${childPidFile}"
+wait
+`,
+    );
+    const briefPath = join(t.repo, "brief.md");
+    writeFileSync(briefPath, "Task.\n", "utf8");
+
+    const start = runCrew(t, ["start", "--role", "builder", "--brief", briefPath, "--branch", "feat/pgid-alive"]);
+    expect(start.exitCode).toBe(0);
+    const jobId = extractJobId(start.stdout);
+
+    const deadline = Date.now() + 3000;
+    let childPid = 0;
+    while (Date.now() < deadline) {
+      if (existsSync(childPidFile)) {
+        const raw = readFileSync(childPidFile, "utf8").trim();
+        if (raw && Number(raw) > 0) {
+          childPid = Number(raw);
+          break;
+        }
+      }
+      await Bun.sleep(25);
+    }
+    expect(childPid).toBeGreaterThan(0);
+
+    const jobRecord = JSON.parse(
+      readFileSync(join(t.repo, ".crew", "jobs", `${jobId}.json`), "utf8"),
+    ) as { pid: number; worktree: string };
+    process.kill(jobRecord.pid, "SIGKILL");
+    await Bun.sleep(50);
+
+    // status, list, start, and clean must still treat the job as running
+    const status = runCrew(t, ["status", jobId]);
+    expect(status.exitCode).toBe(0);
+    expect(status.stdout).toContain("Status: running");
+
+    const listRes = runCrew(t, ["list"]);
+    expect(listRes.exitCode).toBe(0);
+    expect(listRes.stdout).toContain(`${jobId}\trunning`);
+
+    const secondStart = runCrew(t, [
+      "start",
+      "--role",
+      "builder",
+      "--brief",
+      briefPath,
+      "--branch",
+      "feat/pgid-alive",
+    ]);
+    expect(secondStart.exitCode).toBe(1);
+    expect((JSON.parse(secondStart.stderr) as { code: string }).code).toBe("WORKTREE_IN_USE");
+
+    const cleanRes = runCrew(t, ["clean"]);
+    expect(cleanRes.exitCode).toBe(0);
+    expect(existsSync(jobRecord.worktree)).toBe(true);
+
+    // cancel must still succeed and kill the surviving PGID child
+    const cancel = runCrew(t, ["cancel", jobId]);
+    expect(cancel.exitCode).toBe(0);
+    expect(cancel.stdout).toContain(`Canceled job ${jobId}`);
+
+    let childAlive = true;
+    try {
+      process.kill(childPid, 0);
+    } catch {
+      childAlive = false;
+    }
+    expect(childAlive).toBe(false);
+  });
+
+  test("_exec aborts when job status is not running and handles immediate SIGTERM after pid write", async () => {
+    const t = setupRepo();
+    const briefPath = join(t.repo, "brief.md");
+    writeFileSync(briefPath, "Task.\n", "utf8");
+    const agyMarker = join(t.root, "exec-abort-agy.txt");
+
+    installFakeAgy(
+      t.binDir,
+      `touch "${agyMarker}"\necho '{"conversation_id":"c1","result":"Status: DONE\\nok"}'`,
+    );
+
+    const start = runCrew(t, ["start", "--role", "builder", "--brief", briefPath, "--branch", "feat/exec-abort"]);
+    expect(start.exitCode).toBe(0);
+    const jobId = extractJobId(start.stdout);
+    expect(runCrew(t, ["wait", jobId, "--timeout", "10s"]).exitCode).toBe(0);
+    rmSync(agyMarker, { force: true });
+
+    // Mark job as error and re-run _exec: must abort without running agy or overwriting status
+    const jobFile = join(t.repo, ".crew", "jobs", `${jobId}.json`);
+    const finished = JSON.parse(readFileSync(jobFile, "utf8")) as Record<string, unknown>;
+    writeFileSync(
+      jobFile,
+      JSON.stringify({ ...finished, status: "error", pid: null, exit: 1 }, null, 2),
+      "utf8",
+    );
+    const reExec = runCrew(t, ["_exec", jobId]);
+    expect(reExec.exitCode).toBe(3);
+    expect(existsSync(agyMarker)).toBe(false);
+    const afterAbort = JSON.parse(readFileSync(jobFile, "utf8")) as { status: string; pid: number | null };
+    expect(afterAbort.status).toBe("error");
+    expect(afterAbort.pid).toBeNull();
+
+    // Immediate SIGTERM as soon as _exec writes pid -> canceled (never WORKER_CRASHED)
+    installFakeAgy(t.binDir, `sleep 5\necho '{"result":"Status: DONE"}'`);
+    const raceId = "builder-race-sigterm-1";
+    const raceWt = join(t.repo, ".crew", "worktrees", "feat-race-sigterm");
+    Bun.spawnSync(["git", "worktree", "add", "-b", "feat/race-sigterm", "--", raceWt, "HEAD"], {
+      cwd: t.repo,
+      env: t.env,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const raceJobFile = join(t.repo, ".crew", "jobs", `${raceId}.json`);
+    writeFileSync(
+      raceJobFile,
+      JSON.stringify(
+        {
+          id: raceId,
+          role: "builder",
+          worker: "agy",
+          model: null,
+          machine: "local",
+          machineTarget: "local",
+          remotePath: null,
+          branch: "feat/race-sigterm",
+          worktree: raceWt,
+          briefFile: briefPath,
+          pid: null,
+          start: new Date().toISOString(),
+          end: null,
+          exit: null,
+          status: "running",
+          conversationId: null,
+          continuedFrom: null,
+          logFile: join(t.repo, ".crew", "logs", `${raceId}.log`),
+          stdoutFile: join(t.repo, ".crew", "logs", `${raceId}.stdout.json`),
+          resultText: null,
+          error: null,
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    const execProc = Bun.spawn([process.execPath, CREW_TS, "_exec", raceId, "--timeout", "10s"], {
+      cwd: t.repo,
+      env: t.env,
+      stdout: "ignore",
+      stderr: "ignore",
+    });
+    spawnedPids.push(execProc.pid);
+
+    let signaled = false;
+    const pollDeadline = Date.now() + 3000;
+    while (Date.now() < pollDeadline) {
+      const rec = JSON.parse(readFileSync(raceJobFile, "utf8")) as { pid: number | null };
+      if (rec.pid !== null) {
+        process.kill(rec.pid, "SIGTERM");
+        signaled = true;
+        break;
+      }
+      await Bun.sleep(1);
+    }
+    expect(signaled).toBe(true);
+
+    const execCode = await execProc.exited;
+    expect(execCode).toBe(4);
+    const finalRace = JSON.parse(readFileSync(raceJobFile, "utf8")) as { status: string; error: unknown };
+    expect(finalRace.status).toBe("canceled");
+    expect(finalRace.error).toBeNull();
+  });
+
+  test("remote attention Next command works across differing repo paths, and --continue rejects role/branch mismatches", () => {
+    const t = setupRepo();
+    const remoteRepo = join(t.root, "remote repo");
+    mkdirSync(join(remoteRepo, ".claude"), { recursive: true });
+    const rGit = (args: string[]): void => {
+      const r = Bun.spawnSync(["git", ...args], { cwd: remoteRepo, env: t.env, stdout: "pipe", stderr: "pipe" });
+      if (r.exitCode !== 0) throw new Error(r.stderr.toString());
+    };
+    const remoteConfig = {
+      roles: {
+        remote: { worker: "agy", model: "gemini-4-hydrogen-medium", machine: "dev-pc" },
+      },
+      machines: { local: "local", "dev-pc": "ssh factory@dev-pc" },
+      paths: { "dev-pc": remoteRepo },
+    };
+    rGit(["init", "-b", "main"]);
+    rGit(["config", "user.email", "test@example.com"]);
+    rGit(["config", "user.name", "Test User"]);
+    rGit(["config", "commit.gpgsign", "false"]);
+    writeFileSync(join(remoteRepo, "README.md"), "# Remote\n", "utf8");
+    writeFileSync(join(remoteRepo, "brief.md"), "Remote brief.\n", "utf8");
+    writeFileSync(join(remoteRepo, ".claude", "crew.json"), JSON.stringify(remoteConfig, null, 2), "utf8");
+    rGit(["add", "README.md", "brief.md", ".claude/crew.json"]);
+    rGit(["commit", "-m", "remote init"]);
+
+    writeFileSync(
+      join(t.repo, ".claude", "crew.json"),
+      JSON.stringify(
+        {
+          roles: {
+            builder: { worker: "agy", model: "gemini-4-hydrogen-medium", machine: "local" },
+            reviewer: { worker: "agy", model: "gemini-4-hydrogen-high", machine: "local" },
+            remote: { worker: "agy", model: "gemini-4-hydrogen-medium", machine: "dev-pc" },
+          },
+          machines: { local: "local", "dev-pc": "ssh factory@dev-pc" },
+          paths: { "dev-pc": remoteRepo },
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    const sshBin = join(t.binDir, "ssh");
+    writeFileSync(
+      sshBin,
+      `#!/usr/bin/env bash
+set -euo pipefail
+remote_cmd="\${@: -1}"
+rewritten="\${remote_cmd//claude-agent-crew\\/runner\\/crew.ts/${CREW_TS}}"
+bash -c "$rewritten"
+`,
+      "utf8",
+    );
+    chmodSync(sshBin, 0o755);
+
+    const localBrief = join(t.repo, "brief.md");
+    writeFileSync(localBrief, "Local copy of brief.\n", "utf8");
+
+    // 1. Remote job times out with conversationId -> attention Next command prints remote path
+    installFakeAgy(
+      t.binDir,
+      `echo '{"conversation_id":"remote-attn-1","subtype":"timeout","result":"Paused on remote."}'`,
+    );
+    const rStart = runCrew(t, ["start", "--role", "remote", "--brief", localBrief, "--branch", "feat/remote-attn"]);
+    expect(rStart.exitCode).toBe(0);
+    const rId = extractJobId(rStart.stdout);
+    const rWait = runCrew(t, ["wait", rId, "--timeout", "10s"]);
+    expect(rWait.exitCode).toBe(5);
+
+    const nextLine = rWait.stdout.split("\n").find((l) => l.startsWith("Next: "));
+    expect(nextLine).toBeDefined();
+    const nextCmd = (nextLine ?? "").slice("Next: ".length);
+    expect(nextCmd).toContain(remoteRepo);
+
+    // Running that exact Next command on the local orchestrator (where remoteRepo/brief.md is not local repo) succeeds
+    const argsLog = join(t.root, "remote-cont-args.txt");
+    installFakeAgy(
+      t.binDir,
+      `printf '%s\n' "$@" > "${argsLog}"\necho '{"conversation_id":"remote-attn-1","result":"Status: DONE\\nResumed ok."}'`,
+    );
+    const resumed = Bun.spawnSync(["bash", "-c", nextCmd.replace("claude-agent-crew/runner/crew.ts", CREW_TS)], {
+      cwd: t.repo,
+      env: t.env,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    expect(resumed.exitCode).toBe(0);
+    const resumedId = extractJobId(resumed.stdout.toString());
+    expect(runCrew(t, ["wait", resumedId, "--timeout", "10s"]).exitCode).toBe(0);
+    expect(readFileSync(argsLog, "utf8")).toContain("remote-attn-1");
+
+    // 2. Local --continue rejects read-only/builder role mismatches and conflicting --branch
+    installFakeAgy(
+      t.binDir,
+      `echo '{"conversation_id":"rev-conv-1","subtype":"timeout","result":"Paused review."}'`,
+    );
+    const revStart = runCrew(t, ["start", "--role", "reviewer", "--brief", localBrief]);
+    expect(revStart.exitCode).toBe(0);
+    const revId = extractJobId(revStart.stdout);
+    expect(runCrew(t, ["wait", revId, "--timeout", "10s"]).exitCode).toBe(5);
+
+    const revToBuilder = runCrew(t, ["start", "--role", "builder", "--brief", localBrief, "--continue", revId]);
+    expect(revToBuilder.exitCode).toBe(1);
+    expect((JSON.parse(revToBuilder.stderr) as { code: string }).code).toBe("CONTINUE_ROLE_MISMATCH");
+
+    const revBadBranch = runCrew(t, [
+      "start",
+      "--role",
+      "reviewer",
+      "--brief",
+      localBrief,
+      "--branch",
+      "main",
+      "--continue",
+      revId,
+    ]);
+    expect(revBadBranch.exitCode).toBe(1);
+    expect((JSON.parse(revBadBranch.stderr) as { code: string }).code).toBe("CONTINUE_BRANCH_MISMATCH");
+
+    installFakeAgy(
+      t.binDir,
+      `echo '{"conversation_id":"bld-conv-1","subtype":"timeout","result":"Paused build."}'`,
+    );
+    const bldStart = runCrew(t, ["start", "--role", "builder", "--brief", localBrief, "--branch", "feat/bld-cont"]);
+    expect(bldStart.exitCode).toBe(0);
+    const bldId = extractJobId(bldStart.stdout);
+    expect(runCrew(t, ["wait", bldId, "--timeout", "10s"]).exitCode).toBe(5);
+
+    const bldToRev = runCrew(t, ["start", "--role", "reviewer", "--brief", localBrief, "--continue", bldId]);
+    expect(bldToRev.exitCode).toBe(1);
+    expect((JSON.parse(bldToRev.stderr) as { code: string }).code).toBe("CONTINUE_ROLE_MISMATCH");
+
+    const bldBadBranch = runCrew(t, [
+      "start",
+      "--role",
+      "builder",
+      "--brief",
+      localBrief,
+      "--branch",
+      "feat/other-branch",
+      "--continue",
+      bldId,
+    ]);
+    expect(bldBadBranch.exitCode).toBe(1);
+    expect((JSON.parse(bldBadBranch.stderr) as { code: string }).code).toBe("CONTINUE_BRANCH_MISMATCH");
+
+    // Passing matching --branch with --continue succeeds
+    installFakeAgy(t.binDir, `echo '{"conversation_id":"bld-conv-1","result":"Status: DONE\\nOk."}'`);
+    const bldMatchBranch = runCrew(t, [
+      "start",
+      "--role",
+      "builder",
+      "--brief",
+      localBrief,
+      "--branch",
+      "feat/bld-cont",
+      "--continue",
+      bldId,
+    ]);
+    expect(bldMatchBranch.exitCode).toBe(0);
+    expect(runCrew(t, ["wait", extractJobId(bldMatchBranch.stdout), "--timeout", "10s"]).exitCode).toBe(0);
+  });
+
+  test("clean checks current worktree branch (wtInfo.branch), parseAgyOutput extracts multi-line JSON, and branch validation/slug disambiguation", () => {
+    const t = setupRepo();
+    const briefPath = join(t.repo, "brief.md");
+    writeFileSync(briefPath, "Task.\n", "utf8");
+
+    // 1. parseAgyOutput handles diagnostic lines (including unmatched '{') around pretty-printed multi-line JSON
+    installFakeAgy(
+      t.binDir,
+      `
+cat <<'OUT'
+[agy] starting {unclosed diagnostic
+{
+  "conversation_id": "c-multiline-1",
+  "result": "Status: DONE\\nMulti-line JSON extracted.",
+  "nested":
+  {"ignored": true},
+  "usage": {
+    "input_tokens": 55,
+    "output_tokens": 12
+  }
+}
+[agy] trailing log line
+OUT
+`,
+    );
+    const mlStart = runCrew(t, ["start", "--role", "builder", "--brief", briefPath, "--branch", "feat/merged-src"]);
+    expect(mlStart.exitCode).toBe(0);
+    const mlId = extractJobId(mlStart.stdout);
+    expect(runCrew(t, ["wait", mlId, "--timeout", "10s"]).exitCode).toBe(0);
+    const mlRes = runCrew(t, ["result", mlId]);
+    expect(mlRes.exitCode).toBe(0);
+    expect(mlRes.stdout.split("\n")[0]).toBe("Status: DONE");
+    expect(mlRes.stdout).toContain("Multi-line JSON extracted.");
+    expect(mlRes.stdout).not.toContain("diagnostic");
+    expect(mlRes.stdout).not.toContain("{");
+
+    const mlJob = JSON.parse(readFileSync(join(t.repo, ".crew", "jobs", `${mlId}.json`), "utf8")) as {
+      conversationId: string | null;
+      worktree: string;
+    };
+    expect(mlJob.conversationId).toBe("c-multiline-1");
+    const usageLine = readFileSync(join(t.repo, ".crew", "usage.jsonl"), "utf8").trim().split("\n")[0] ?? "{}";
+    expect((JSON.parse(usageLine) as { usage: { input_tokens: number } }).usage.input_tokens).toBe(55);
+
+    // 2. clean keeps worktree when job.branch is merged but checkout was switched to an unmerged branch
+    writeFileSync(join(mlJob.worktree, "src.txt"), "merged work\n", "utf8");
+    Bun.spawnSync(["git", "add", "src.txt"], { cwd: mlJob.worktree, env: t.env });
+    Bun.spawnSync(["git", "commit", "-m", "commit on merged-src"], { cwd: mlJob.worktree, env: t.env });
+    Bun.spawnSync(["git", "merge", "--no-ff", "feat/merged-src", "-m", "merge src"], { cwd: t.repo, env: t.env });
+
+    Bun.spawnSync(["git", "checkout", "-b", "feat/switched-unmerged"], { cwd: mlJob.worktree, env: t.env });
+    writeFileSync(join(mlJob.worktree, "important.txt"), "unmerged work\n", "utf8");
+    Bun.spawnSync(["git", "add", "important.txt"], { cwd: mlJob.worktree, env: t.env });
+    Bun.spawnSync(["git", "commit", "-m", "unmerged commit"], { cwd: mlJob.worktree, env: t.env });
+
+    const cleanRes = runCrew(t, ["clean"]);
+    expect(cleanRes.exitCode).toBe(0);
+    expect(existsSync(mlJob.worktree)).toBe(true);
+    expect(existsSync(join(mlJob.worktree, "important.txt"))).toBe(true);
+    expect(cleanRes.stdout).toContain("feat/switched-unmerged");
+
+    // 3. Branch validation rejects '-' prefix and invalid git branch names
+    const dashBuilder = runCrew(t, ["start", "--role", "builder", "--brief", briefPath, "--branch", "-foo"]);
+    expect(dashBuilder.exitCode).toBe(1);
+    expect((JSON.parse(dashBuilder.stderr) as { code: string }).code).toBe("INVALID_BRANCH");
+
+    const dashReviewer = runCrew(t, ["start", "--role", "reviewer", "--brief", briefPath, "--branch", "-foo"]);
+    expect(dashReviewer.exitCode).toBe(1);
+    expect((JSON.parse(dashReviewer.stderr) as { code: string }).code).toBe("INVALID_BRANCH");
+
+    const badRef = runCrew(t, ["start", "--role", "builder", "--brief", briefPath, "--branch", "feat..bad"]);
+    expect(badRef.exitCode).toBe(1);
+    expect((JSON.parse(badRef.stderr) as { code: string }).code).toBe("INVALID_BRANCH");
+
+    // 4. Slug disambiguation: feat/slug, feat@slug, and feat-slug get distinct worktree directories
+    installFakeAgy(t.binDir, `echo '{"conversation_id":"c-slug","result":"Status: DONE\\nok"}'`);
+    const slugPaths = new Set<string>();
+    for (const branch of ["feat/slug", "feat@slug", "feat-slug"]) {
+      const s = runCrew(t, ["start", "--role", "builder", "--brief", briefPath, "--branch", branch]);
+      expect(s.exitCode).toBe(0);
+      const id = extractJobId(s.stdout);
+      expect(runCrew(t, ["wait", id, "--timeout", "10s"]).exitCode).toBe(0);
+      const j = JSON.parse(readFileSync(join(t.repo, ".crew", "jobs", `${id}.json`), "utf8")) as {
+        worktree: string;
+      };
+      slugPaths.add(j.worktree);
+    }
+    expect(slugPaths.size).toBe(3);
+  });
+
+  test("stale start.lock serializes concurrent starts cleanly and remote cancel syncs finished job status", async () => {
+    const t = setupRepo();
+    const briefPath = join(t.repo, "brief.md");
+    writeFileSync(briefPath, "Task.\n", "utf8");
+
+    // 1. Stale start.lock (>10s old) with two concurrent crew start invocations
+    mkdirSync(join(t.repo, ".crew", "start.lock"), { recursive: true });
+    const past = new Date(Date.now() - 20_000);
+    utimesSync(join(t.repo, ".crew", "start.lock"), past, past);
+
+    installFakeAgy(t.binDir, `sleep 1\necho '{"conversation_id":"c-lock","result":"Status: DONE\\nok"}'`);
+    const spawnStart = (branch: string) => {
+      const p = Bun.spawn([process.execPath, CREW_TS, "start", "--role", "builder", "--brief", briefPath, "--branch", branch], {
+        cwd: t.repo,
+        env: t.env,
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      return Promise.all([p.exited, new Response(p.stdout).text(), new Response(p.stderr).text()]);
+    };
+
+    const [r1, r2] = await Promise.all([spawnStart("feat/stale-1"), spawnStart("feat/stale-2")]);
+    expect(r1[0]).toBe(0);
+    expect(r2[0]).toBe(0);
+    const id1 = extractJobId(r1[1]);
+    const id2 = extractJobId(r2[1]);
+    expect(runCrew(t, ["cancel", id1]).exitCode).toBe(0);
+    expect(runCrew(t, ["cancel", id2]).exitCode).toBe(0);
+
+    // Also test stale lock with two concurrent starts on the SAME branch: one wins, one gets WORKTREE_IN_USE
+    mkdirSync(join(t.repo, ".crew", "start.lock"), { recursive: true });
+    utimesSync(join(t.repo, ".crew", "start.lock"), past, past);
+    const [same1, same2] = await Promise.all([spawnStart("feat/stale-same"), spawnStart("feat/stale-same")]);
+    const exits = [same1[0], same2[0]].sort();
+    expect(exits).toEqual([0, 1]);
+    const loserErr = same1[0] === 1 ? same1[2] : same2[2];
+    expect((JSON.parse(loserErr) as { code: string }).code).toBe("WORKTREE_IN_USE");
+    const winnerId = extractJobId(same1[0] === 0 ? same1[1] : same2[1]);
+    expect(runCrew(t, ["cancel", winnerId]).exitCode).toBe(0);
+
+    // 2. Remote cancel on an already-finished remote job syncs local JobRecord out of "running"
+    const remoteRepo = join(t.root, "remote-cancel-sync");
+    mkdirSync(join(remoteRepo, ".claude"), { recursive: true });
+    const rGit = (args: string[]): void => {
+      const r = Bun.spawnSync(["git", ...args], { cwd: remoteRepo, env: t.env, stdout: "pipe", stderr: "pipe" });
+      if (r.exitCode !== 0) throw new Error(r.stderr.toString());
+    };
+    rGit(["init", "-b", "main"]);
+    rGit(["config", "user.email", "test@example.com"]);
+    rGit(["config", "user.name", "Test User"]);
+    rGit(["config", "commit.gpgsign", "false"]);
+    writeFileSync(join(remoteRepo, "README.md"), "# Remote\n", "utf8");
+    writeFileSync(join(remoteRepo, "brief.md"), "Remote.\n", "utf8");
+    writeFileSync(
+      join(remoteRepo, ".claude", "crew.json"),
+      JSON.stringify(
+        {
+          roles: { remote: { worker: "agy", machine: "dev-pc" } },
+          machines: { local: "local", "dev-pc": "ssh factory@dev-pc" },
+          paths: { "dev-pc": remoteRepo },
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+    rGit(["add", "README.md", "brief.md", ".claude/crew.json"]);
+    rGit(["commit", "-m", "init"]);
+
+    writeFileSync(
+      join(t.repo, ".claude", "crew.json"),
+      JSON.stringify(
+        {
+          roles: { remote: { worker: "agy", machine: "dev-pc" } },
+          machines: { local: "local", "dev-pc": "ssh factory@dev-pc" },
+          paths: { "dev-pc": remoteRepo },
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+    const sshBin = join(t.binDir, "ssh");
+    writeFileSync(
+      sshBin,
+      `#!/usr/bin/env bash
+set -euo pipefail
+remote_cmd="\${@: -1}"
+rewritten="\${remote_cmd//claude-agent-crew\\/runner\\/crew.ts/${CREW_TS}}"
+bash -c "$rewritten"
+`,
+      "utf8",
+    );
+    chmodSync(sshBin, 0o755);
+
+    installFakeAgy(t.binDir, `echo '{"conversation_id":"c-fast","result":"Status: DONE\\nFast."}'`);
+    const remoteFast = runCrew(t, ["start", "--role", "remote", "--brief", briefPath, "--branch", "feat/fast-remote"]);
+    expect(remoteFast.exitCode).toBe(0);
+    const fastId = extractJobId(remoteFast.stdout);
+
+    // Wait briefly for the remote _exec to finish on remoteRepo without calling local wait/status
+    const remoteJobPath = join(remoteRepo, ".crew", "jobs", `${fastId}.json`);
+    const doneDeadline = Date.now() + 3000;
+    while (Date.now() < doneDeadline) {
+      if (existsSync(remoteJobPath)) {
+        const rj = JSON.parse(readFileSync(remoteJobPath, "utf8")) as { status: string };
+        if (rj.status === "done") break;
+      }
+      await Bun.sleep(25);
+    }
+
+    const cancelFinished = runCrew(t, ["cancel", fastId]);
+    expect(cancelFinished.exitCode).toBe(1);
+    const localAfter = JSON.parse(readFileSync(join(t.repo, ".crew", "jobs", `${fastId}.json`), "utf8")) as {
+      status: string;
+    };
+    expect(localAfter.status).toBe("done");
+    const listAfter = runCrew(t, ["list"]);
+    expect(listAfter.stdout).toContain(`${fastId}\tdone`);
   });
 });

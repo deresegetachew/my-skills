@@ -3,6 +3,7 @@
 // Job-lifecycle design (start/wait/status/result/cancel/list/clean) credited to
 // github.com/keli-wen/agy-staff (MIT).
 
+import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -10,7 +11,9 @@ import {
   cleanFinishedWorktrees,
   ensureCrewExcluded,
   getRepoRoot,
+  isReadOnlyRole,
   prepareWorktree,
+  validateBranchName,
 } from "./git.ts";
 import {
   appendUsage,
@@ -74,26 +77,6 @@ function isPidAlive(pid: number): boolean {
   }
 }
 
-function isJobProcessAlive(pid: number, jobId: string): boolean {
-  const res = Bun.spawnSync(["ps", "-ww", "-p", String(pid), "-o", "stat=,args="], {
-    stdout: "pipe",
-    stderr: "ignore",
-  });
-  if (res.exitCode === 0) {
-    const line = res.stdout.toString().trim();
-    const match = /^\s*(\S+)\s+(.*)$/.exec(line);
-    if (!match) return false;
-    const stat = match[1] ?? "";
-    const args = match[2] ?? "";
-    if (stat.startsWith("Z")) return false;
-    return args.includes(jobId);
-  }
-  // If ps rejected the PID (exit 1), the process does not exist.
-  // Only fall back to process.kill(0) if ps failed with a spawn error (exitCode null).
-  if (res.exitCode === null) return isPidAlive(pid);
-  return false;
-}
-
 function hasLiveProcessInPgid(pgid: number): boolean {
   const entries = listProcesses();
   if (entries !== null) {
@@ -125,7 +108,7 @@ function inspectJobPgid(pid: number, jobId: string): "alive" | "mismatch" | "exi
 
 function syncJobLiveness(repoRoot: string, job: JobRecord): JobRecord {
   if (job.status !== "running" || job.pid === null || job.remotePath !== null) return job;
-  if (isJobProcessAlive(job.pid, job.id)) return job;
+  if (inspectJobPgid(job.pid, job.id) === "alive") return job;
   const fresh = readJob(repoRoot, job.id);
   if (fresh && fresh.status !== "running") return fresh;
 
@@ -242,23 +225,54 @@ function formatContinueCmd(job: JobRecord): string {
 function withStartLock<T>(repoRoot: string, fn: () => T): T {
   ensureCrewDirs(repoRoot);
   const lockDir = join(crewDir(repoRoot), "start.lock");
+  const reclaimLock = `${lockDir}.reclaim`;
+  const ownerFile = join(lockDir, "owner");
+  const ownerToken = `${process.pid}-${randomBytes(4).toString("hex")}`;
   const deadline = Date.now() + 5000;
   const waitBuf = new Int32Array(new SharedArrayBuffer(4));
 
   while (true) {
     try {
       mkdirSync(lockDir);
+      try {
+        writeFileSync(ownerFile, ownerToken, "utf8");
+      } catch {
+        // Ignore if lock was concurrently removed
+      }
       break;
     } catch {
+      let didDelete = false;
       try {
         const st = statSync(lockDir);
         if (Date.now() - st.mtimeMs > 10_000) {
-          rmSync(lockDir, { recursive: true, force: true });
-          continue;
+          let reclaimed = false;
+          try {
+            mkdirSync(reclaimLock);
+            reclaimed = true;
+            const recheck = statSync(lockDir);
+            if (Date.now() - recheck.mtimeMs > 10_000) {
+              rmSync(lockDir, { recursive: true, force: true });
+              didDelete = true;
+            }
+          } catch {
+            try {
+              const rst = statSync(reclaimLock);
+              if (Date.now() - rst.mtimeMs > 10_000) {
+                rmSync(reclaimLock, { recursive: true, force: true });
+              }
+            } catch {
+              // reclaimLock already released
+            }
+          } finally {
+            if (reclaimed) {
+              rmSync(reclaimLock, { recursive: true, force: true });
+            }
+          }
         }
       } catch {
         // Lock was released between mkdir and stat
       }
+      if (didDelete) continue;
       if (Date.now() >= deadline) {
         throw new CrewCliError(
           "LOCK_TIMEOUT",
@@ -273,7 +287,13 @@ function withStartLock<T>(repoRoot: string, fn: () => T): T {
   try {
     return fn();
   } finally {
-    rmSync(lockDir, { recursive: true, force: true });
+    try {
+      if (readFileSync(ownerFile, "utf8") === ownerToken) {
+        rmSync(lockDir, { recursive: true, force: true });
+      }
+    } catch {
+      // Lock already removed or reclaimed
+    }
   }
 }
 
@@ -364,13 +384,6 @@ async function cmdStart(repoRoot: string, args: string[]): Promise<number> {
   }
 
   const briefPath = resolve(process.cwd(), briefArg);
-  if (!existsSync(briefPath)) {
-    throw new CrewCliError(
-      "BRIEF_NOT_FOUND",
-      `Brief file not found: ${briefPath}`,
-      "Pass a valid path to --brief <file>.",
-    );
-  }
 
   const config = readCrewConfig(repoRoot);
   const roleConfig = config.roles[role];
@@ -380,6 +393,10 @@ async function cmdStart(repoRoot: string, args: string[]): Promise<number> {
       `Role "${role}" is not defined in .claude/crew.json.`,
       `Add "${role}" to "roles" in .claude/crew.json or use one of: ${Object.keys(config.roles).join(", ")}.`,
     );
+  }
+
+  if (branch !== undefined) {
+    validateBranchName(repoRoot, branch, isReadOnlyRole(role));
   }
 
   assertWorkerSupported(roleConfig.worker, role);
@@ -466,6 +483,14 @@ async function cmdStart(repoRoot: string, args: string[]): Promise<number> {
     return 0;
   }
 
+  if (!existsSync(briefPath)) {
+    throw new CrewCliError(
+      "BRIEF_NOT_FOUND",
+      `Brief file not found: ${briefPath}`,
+      "Pass a valid path to --brief <file>.",
+    );
+  }
+
   ensureCrewExcluded(repoRoot);
   ensureCrewDirs(repoRoot);
 
@@ -497,7 +522,7 @@ async function cmdStart(repoRoot: string, args: string[]): Promise<number> {
     const wtAssignment = prepareWorktree(repoRoot, {
       jobId: id,
       role,
-      branch: branch ?? continueJob?.branch ?? undefined,
+      branch,
       continueJob,
       runningJobs,
     });
@@ -567,13 +592,27 @@ async function cmdStart(repoRoot: string, args: string[]): Promise<number> {
     }
     await Bun.sleep(15);
   }
+  if (!current || (current.pid === null && current.end === null)) {
+    current = readJob(repoRoot, jobId);
+  }
 
   if (!current || (current.pid === null && current.end === null)) {
-    const baseJob = current ?? readJob(repoRoot, jobId);
+    if (child.pid) {
+      try {
+        process.kill(-child.pid, "SIGKILL");
+      } catch {
+        try {
+          process.kill(child.pid, "SIGKILL");
+        } catch {
+          // already exited
+        }
+      }
+    }
+    const baseJob = readJob(repoRoot, jobId) ?? current;
     const errMsg = spawnErrorMsg
       ? `Failed to spawn job supervisor: ${spawnErrorMsg}`
       : `Job supervisor exited (${execExitCode ?? "timeout"}) before recording a PID.`;
-    if (baseJob) {
+    if (baseJob && baseJob.status === "running") {
       writeJob(repoRoot, {
         ...baseJob,
         status: "error",
@@ -619,18 +658,6 @@ async function cmdExec(repoRoot: string, args: string[]): Promise<number> {
     );
   }
 
-  const job = readJob(repoRoot, jobId);
-  if (!job) {
-    throw new CrewCliError(
-      "JOB_NOT_FOUND",
-      `Job "${jobId}" not found.`,
-      `Run \`${RUNNER_CMD} list\` to see available jobs.`,
-    );
-  }
-
-  job.pid = process.pid;
-  writeJob(repoRoot, job);
-
   let cancelRequested = false;
   let activeProc: Bun.Subprocess<"ignore", "pipe", "pipe"> | null = null;
   const forwardedSignals = new Set<NodeJS.Signals>();
@@ -653,6 +680,35 @@ async function cmdExec(repoRoot: string, args: string[]): Promise<number> {
   process.on("SIGTERM", () => onSignal("SIGTERM"));
   process.on("SIGINT", () => onSignal("SIGINT"));
 
+  const job = readJob(repoRoot, jobId);
+  if (!job) {
+    throw new CrewCliError(
+      "JOB_NOT_FOUND",
+      `Job "${jobId}" not found.`,
+      `Run \`${RUNNER_CMD} list\` to see available jobs.`,
+    );
+  }
+  if (job.status !== "running") {
+    return exitCodeForStatus(job.status);
+  }
+  if (cancelRequested) {
+    const latest = readJob(repoRoot, job.id);
+    if (latest && latest.status !== "running") {
+      return exitCodeForStatus(latest.status);
+    }
+    writeJob(repoRoot, {
+      ...(latest ?? job),
+      pid: process.pid,
+      status: "canceled",
+      end: new Date().toISOString(),
+      exit: 143,
+    });
+    return 4;
+  }
+
+  job.pid = process.pid;
+  writeJob(repoRoot, job);
+
   try {
     const printTimeout = stringFlag(flags, "timeout") ?? "30m";
     const briefText = readFileSync(job.briefFile, "utf8");
@@ -667,17 +723,18 @@ async function cmdExec(repoRoot: string, args: string[]): Promise<number> {
       conversationId: job.continuedFrom ? job.conversationId : null,
     });
 
+    const latestBefore = readJob(repoRoot, job.id);
+    if (latestBefore && latestBefore.status !== "running") {
+      return exitCodeForStatus(latestBefore.status);
+    }
     if (cancelRequested) {
-      const latestBefore = readJob(repoRoot, job.id);
-      if (!latestBefore || latestBefore.status !== "canceled") {
-        writeJob(repoRoot, {
-          ...(latestBefore ?? job),
-          pid: process.pid,
-          status: "canceled",
-          end: new Date().toISOString(),
-          exit: 143,
-        });
-      }
+      writeJob(repoRoot, {
+        ...(latestBefore ?? job),
+        pid: process.pid,
+        status: "canceled",
+        end: new Date().toISOString(),
+        exit: 143,
+      });
       return 4;
     }
 
@@ -787,7 +844,17 @@ async function cmdExec(repoRoot: string, args: string[]): Promise<number> {
       // ignore if log directory is unreachable
     }
     const latest = readJob(repoRoot, job.id);
-    if (cancelRequested || (latest && latest.status === "canceled")) {
+    if (latest && latest.status !== "running") {
+      return exitCodeForStatus(latest.status);
+    }
+    if (cancelRequested) {
+      writeJob(repoRoot, {
+        ...(latest ?? job),
+        pid: process.pid,
+        status: "canceled",
+        end: new Date().toISOString(),
+        exit: 143,
+      });
       return 4;
     }
     writeJob(repoRoot, {
@@ -1121,6 +1188,30 @@ async function cmdCancel(repoRoot: string, args: string[]): Promise<number> {
         end: new Date().toISOString(),
         exit: 143,
       });
+    } else {
+      const errText = res.stderr.toString().trim();
+      try {
+        const parsedErr: unknown = JSON.parse(errText);
+        if (
+          typeof parsedErr === "object" &&
+          parsedErr !== null &&
+          "code" in parsedErr &&
+          (parsedErr as { code?: unknown }).code === "JOB_NOT_RUNNING" &&
+          "message" in parsedErr &&
+          typeof (parsedErr as { message?: unknown }).message === "string"
+        ) {
+          const msg = (parsedErr as { message: string }).message;
+          const m = /\(status:\s*(done|error|canceled|attention)\)|status\s+"(done|error|canceled|attention)"/.exec(
+            msg,
+          );
+          const remoteStatus = (m?.[1] ?? m?.[2]) as JobStatus | undefined;
+          if (remoteStatus) {
+            syncRemoteJobStatus(repoRoot, raw, exitCodeForStatus(remoteStatus));
+          }
+        }
+      } catch {
+        // Non-JSON stderr from SSH/remote
+      }
     }
     return code;
   }

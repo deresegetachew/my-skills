@@ -155,6 +155,65 @@ function extractUsage(raw: unknown): UsageMetrics | null {
   return Object.keys(out).length > 0 ? out : null;
 }
 
+function extractLastJsonObject(text: string): Record<string, unknown> | null {
+  let last: Record<string, unknown> | null = null;
+  let i = 0;
+  let attempts = 0;
+  const maxAttempts = 500;
+
+  while (i < text.length && attempts < maxAttempts) {
+    const start = text.indexOf("{", i);
+    if (start === -1) break;
+    attempts++;
+
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    let matchedEnd = -1;
+
+    for (let j = start; j < text.length; j++) {
+      const ch = text[j];
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+        } else if (ch === "\\") {
+          escaped = true;
+        } else if (ch === '"') {
+          inString = false;
+        }
+        continue;
+      }
+      if (ch === '"') {
+        inString = true;
+      } else if (ch === "{") {
+        depth++;
+      } else if (ch === "}") {
+        depth--;
+        if (depth === 0) {
+          matchedEnd = j;
+          break;
+        }
+      }
+    }
+
+    if (matchedEnd !== -1) {
+      try {
+        const candidate: unknown = JSON.parse(text.slice(start, matchedEnd + 1));
+        if (isRecord(candidate)) {
+          last = candidate;
+          i = matchedEnd + 1;
+          continue;
+        }
+      } catch {
+        // Not valid JSON; advance past this '{'
+      }
+    }
+    i = start + 1;
+  }
+
+  return last;
+}
+
 export function parseAgyOutput(stdoutText: string, stderrText = ""): ParsedWorkerOutput {
   const trimmed = stdoutText.trim();
   if (!trimmed) {
@@ -173,20 +232,8 @@ export function parseAgyOutput(stdoutText: string, stderrText = ""): ParsedWorke
   try {
     parsed = JSON.parse(trimmed);
   } catch {
-    // Handle case where diagnostic lines precede or follow a JSON object
-    const lines = trimmed.split(/\r?\n/).reverse();
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      try {
-        const candidate: unknown = JSON.parse(line);
-        if (isRecord(candidate)) {
-          parsed = candidate;
-          break;
-        }
-      } catch {
-        continue;
-      }
-    }
+    // Handle diagnostic lines around single-line or pretty-printed multi-line JSON
+    parsed = extractLastJsonObject(trimmed);
   }
 
   if (!isRecord(parsed)) {
