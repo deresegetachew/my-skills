@@ -7,8 +7,9 @@ The orchestrator runs on one always-on machine; crew runs go wherever `crew.json
    `agy plugin install <my-skills>/claude-agent-crew/workers/agy/plugin`.
 2. A clone of each project for crew work, separate from any human's working copy, with the git pre-push hook that
    refuses pushes to main or master, force-pushes and branch deletion.
-3. The crew apps' keys (the Mac keychain, or a file only that user can read) and the token helper, so `gh` runs as
-   the app via `GH_TOKEN`.
+3. The crew apps' keys, readable only by the orchestrator's OS user (the Mac keychain, or a mode-600 file), and the
+   token helper that gives each job a short-lived token for its role. Running crew jobs as a separate OS user keeps
+   the keys out of their reach.
 4. Bun on the PATH of non-interactive shells (hooks and the runner use it).
 5. A clock kept in sync (NTP), so tokens and logs line up.
 

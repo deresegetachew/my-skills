@@ -4,10 +4,15 @@ Run it on the first `/crew` in a project and whenever something looks wrong. It 
 what is missing.
 
 **Once ever (GitHub):** two GitHub Apps under the human's account, never their personal token:
-- `crew-writer`: Contents and Pull requests read/write, Metadata read; no Administration. Builders push branches and
-  open PRs with it; the orchestrator merges with it once the rule allows.
-- `crew-reviewer`: Contents read, Pull requests read/write (to post reviews), Metadata read. Reviewers and
-  auditors post their verdict with it.
+- `crew-writer`: Contents, Pull requests and Issues read/write, Metadata read; no Administration. Builders push
+  branches and open PRs with it; the orchestrator files issues and merges with it once the rule allows.
+- `crew-reviewer`: Contents read, Pull requests read/write (to post reviews), Commit statuses read/write (for the
+  fallback check below), Metadata read. Reviewers and auditors post their verdict with it.
+
+Workers never hold app keys. The token helper (built with `/crew setup`) runs as the orchestrator and hands each
+job a 1-hour token for its role only, as `GH_TOKEN`. Builders' guards also refuse `gh pr merge`, so a builder
+cannot merge even an approved PR. For a hard boundary, run crew jobs as a separate OS user that cannot read the
+keys (see `machines.md`).
 Create each from a manifest: open its page already filled in, the human clicks Create and Install; GitHub hands the
 key back, so nobody copies secrets.
 

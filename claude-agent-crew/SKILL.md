@@ -24,7 +24,8 @@ agent sessions does the work, one role per run. Only you decide scope, merge, an
 - `/crew`: start or resume. Read the PRD, journeys, open issues and PRs, crew job states (`crew status`) and the
   latest handoff note; tell the human in a few lines where things stand and what you propose next; then run the loop.
 - `/crew setup`: first run in a project, or to check it. See `project-setup.md`. Fix only what is missing; show a
-  diff before changing an existing rule.
+  diff before changing an existing rule. `/crew setup add <repo>` covers another repo; `/crew setup rotate` replaces
+  the apps' keys.
 - `/crew po`, `/crew dm`: answer in one hat explicitly (`hats/product-owner.md`, `hats/dev-manager.md`).
 - `/crew handoff`: write the handoff note now (`handoff.md`).
 
@@ -35,27 +36,44 @@ agent sessions does the work, one role per run. Only you decide scope, merge, an
 2. **Brief** it from `roles/<role>.md`. A brief is all the worker knows: the outcome and how it is checked, the
    human's constraints copied word for word, settled decisions (check the facts they rest on), and where to stop.
    Point at files; don't paste them.
-3. **Start** it: `crew start --role <role> --brief <file> [--branch <b>]`. Parallel edits need separate worktrees;
+3. **Start** it: `crew start --role <role> --brief <file> --branch <b>`. `--branch` names the branch a builder
+   creates or a reviewer checks out; researchers and designers may omit it. Parallel edits need separate worktrees;
    settle shared names and interfaces before writing parallel briefs. One change is one assignment, including its
-   tests; don't split implement, test and review into separate handoffs.
+   tests; don't split implement, test and review into separate handoffs. Use a `test-writer` before the builder
+   only when the tests are the specification: a bug to reproduce first, or a safety rule whose acceptance tests
+   must exist before anyone writes the code.
 4. **Wait, don't poll.** Run `crew wait <id>` in the background and end your turn; you are woken when it ends.
-   Never loop on `status`. Exit codes: 0 done, 2 still running (wait again), 3 error, 4 canceled, 5 attention (a
-   resumable timeout: ask the human before continuing), 1 bad command.
+   Never loop on `status`. What each outcome means for you:
+
+   | Outcome | Next step |
+   | --- | --- |
+   | exit 0, `Status: DONE` | Assess (step 5) |
+   | exit 0, `DONE_WITH_CONCERNS` | Read the concerns first; they may overturn a decision |
+   | exit 0, `BLOCKED` | Answer what it needs from settled facts and continue the job, or take the question to the human |
+   | exit 2 | Still running: wait again on the same job |
+   | exit 3 | Read `crew result <id>`. A quota or usage limit: note the reset time and continue the job after it. Anything else: fix the cause, then continue or restart |
+   | exit 4 | Canceled: account for partial edits (`git status`) before anything else |
+   | exit 5 | Timed out but resumable: ask the human whether to continue with a longer timeout |
+   | exit 1 | Your command was wrong: fix the named problem |
+
+   Continue a job with `crew start --continue <job-id> --brief <follow-up>`; it keeps the worker's conversation.
+   Never retry or continue automatically after a timeout.
 5. **Assess cheaply.** Read the result's `Status:` line and any `Conflicts with the brief` first, then
    `git diff --stat`. Acceptance costs a fraction of the work: check interface choices, departures from the brief
    and figures reported as verified; don't redo the work. A small defect you understand: fix it yourself. A real
    gap: a focused follow-up (`--continue` when the context helps).
 6. **Review** every change with a fresh session (`reviewer`, plus `security-reviewer` or `architecture-reviewer`
-   when the change touches their area). A session never reviews its own work. Must-fix findings become follow-up
-   build tasks.
+   when the change touches their area). A session never reviews its own work. Reviewers post their verdict on the PR
+   as `crew-reviewer`. Clean means no open critical, high or medium finding; low and nit findings may become
+   issues. Fixes go back to the builder (continue its job), and the changed PR gets a fresh review again.
 7. **Audit** changes to safety rules, gates, money and data that must never change: the `auditor` tries to break
    them; check each break is real; each real break becomes a failing test plus a fix task; audit again until
    nothing breaks.
-8. **Merge** when review is clean, audits find nothing and CI passes, through the rule on main. If CI fails only
-   on an infrastructure step after every test step passed, say so on the PR before merging. Rerun an unrelated
-   flaky test once; a second failure is a task.
-9. **Check as a user** on staging (`journey-tester` for the numbered journeys; look at real screens at desktop
-   and phone widths, not page text) and file what fails.
+8. **Merge** when review is clean, audits find nothing and CI is green, through the rule on main; you are the only
+   one who merges. Rerun an unrelated flaky test once; a second failure is a task. If CI stays red for a reason
+   outside the change (runner, quota, infrastructure), tell the human; never merge red.
+9. **Check as a user** where the project has users: on staging, a `journey-tester` walks the numbered journeys;
+   for a UI, look at real screens at desktop and phone widths, not page text. File what fails as issues.
 10. **Report** to the human in a few lines: what merged, what you found, what needs them. Then `crew clean`.
 
 ## Rules that do not bend

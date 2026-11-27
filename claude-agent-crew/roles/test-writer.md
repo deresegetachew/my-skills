@@ -5,4 +5,4 @@
 **Constraints:** <verbatim>
 **Stop when:** the tests exist, fail for the right reason (show the failure), and test what a user or another
 program can observe, never internals. Push the branch; no PR yet unless asked.
-**Report:** `Status:` line; tests added; the failing output, trimmed.
+**Report:** `Status:` line; `Conflicts with the brief` if any; tests added; the failing output, trimmed.
