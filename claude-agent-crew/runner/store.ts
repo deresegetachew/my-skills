@@ -200,6 +200,7 @@ export function readCrewConfig(repoRoot: string): CrewConfig {
       worker: rawRole.worker.trim(),
       model: typeof rawRole.model === "string" ? rawRole.model.trim() : undefined,
       machine: typeof rawRole.machine === "string" ? rawRole.machine.trim() : undefined,
+      agent: typeof rawRole.agent === "string" && rawRole.agent.trim() !== "" ? rawRole.agent.trim() : undefined,
     };
   }
 

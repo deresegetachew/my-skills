@@ -24,6 +24,9 @@ key back, so nobody copies secrets.
 3. `AGENTS.md` at the root pointing every agent to `CLAUDE.md`, and `.agents/skills` linking to `.claude/skills`, so
    other agent CLIs find the project's rules and skills.
 4. `.claude/crew.json` from `crew.example.json`: ask the human which worker and model fill each role, once.
+   A role may set `"agent"` to reuse another role's agent definition with a different model, for example
+   `"builder-strong": { "worker": "agy", "model": "claude-sonnet-5-5-medium", "agent": "builder" }`; without it the
+   agent is the role's own name.
 5. `.crew/` in `.git/info/exclude`.
 
 **Once per machine:** see `machines.md`.

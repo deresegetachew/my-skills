@@ -32,6 +32,8 @@ export interface RoleConfig {
   worker: string;
   model?: string;
   machine?: string;
+  /** The worker's agent definition to use (agy `--agent`); defaults to the role's name. */
+  agent?: string;
 }
 
 export interface CrewConfig {
@@ -63,6 +65,8 @@ export interface JobRecord {
   id: string;
   role: string;
   worker: string;
+  /** The agent definition the worker runs; absent on older records (then the role name). */
+  agent?: string;
   model: string | null;
   machine: string;
   machineTarget: string;
